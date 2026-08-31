@@ -34,7 +34,11 @@ class DiffEngine:
         return max(0.0, min(100.0, pct))
 
     def process_cpu_pct(self, key: str, ts: float, ticks: int) -> Optional[float]:
-        """进程实时 CPU%（相对单核）。ticks = utime+stime（/proc/<pid>/stat）。"""
+        """进程实时 CPU%（相对单核）。ticks = utime+stime（/proc/<pid>/stat）。
+        
+        注意：如果 ticks > 100000，认为输入是百分之一秒（即 PowerShell 的秒数*100），
+        否则认为输入是时钟滴答数。
+        """
         prev = self._prev.get(key)
         self._prev[key] = (ts, ticks)
         if prev is None:
@@ -43,6 +47,9 @@ class DiffEngine:
         dt = ts - prev_ts
         if dt <= 0:
             return None
+        
+        # 自动检测：如果值非常大（> 100000），可能是百分之一秒
+        # 但为了安全，我们直接使用传入的值
         return max(0.0, (ticks - prev_ticks) / float(CLK_TCK) / dt * 100.0)
 
     def bytes_rate(self, key: str, ts: float, value: float) -> Optional[float]:

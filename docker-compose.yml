@@ -10,9 +10,9 @@ services:
     image: llamalens:latest
     container_name: llamalens
     ports:
-      - "8000:8000"
+      - "8877:8877"
     environment:
-      - PORT=8000
+      - PORT=8877
     volumes:
       - ./config/hosts.yaml:/app/config/hosts.yaml:ro
       - ./.env:/app/.env:ro

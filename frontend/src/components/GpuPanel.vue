@@ -149,12 +149,23 @@ const THROTTLE_BITS = [
   [0x100, '热功率刹车'], [0x200, 'SW FLIP'], [0x400, 'HW FLIP'], [0x800, '热功率刹车'],
   [0x1000, '功率刹车']
 ]
+// 0x1 (HW Throttle) 在 GPU 空闲+低温时被驱动错误设置（时钟回到低频节能状态），
+// 非真正的硬件保护降频。忽略条件：利用率<5% 且 温度<70°C
+const HW_THROTTLE_FAKE_THRESHOLD = { util: 5, temp: 70 }
 const throttleNames = computed(() => {
   const t = props.gpu.throttle
   if (t === null || t === undefined) return null
   if (t === 0) return []
+  const util = props.gpu.util_pct ?? -1
+  const temp = props.gpu.temp_c ?? 100
+  const isIdle = util < HW_THROTTLE_FAKE_THRESHOLD.util && temp < HW_THROTTLE_FAKE_THRESHOLD.temp
   const names = []
-  for (const [bit, name] of THROTTLE_BITS) if (t & bit) names.push(name)
+  for (const [bit, name] of THROTTLE_BITS) {
+    if (t & bit) {
+      if (bit === 0x1 && isIdle) continue  // 假阳性：空闲低温时的 0x1 位
+      names.push(name)
+    }
+  }
   return names
 })
 const throttleText = computed(() => {

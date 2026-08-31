@@ -71,6 +71,9 @@ BOOT_BLOCK_CMD = (
 BOOT_BLOCK_CMD_FILE = (
     "tail -n 50000 {path} 2>/dev/null | grep -B 200 'listening on' | tail -201"
 )
+BOOT_BLOCK_CMD_WIN = (
+    "powershell -NoProfile -Command \"Get-WinEvent -LogName Application -MaxEvents 50000 | Where-Object {{ $_.Message -like '*llama-server*' }} | Select-Object TimeCreated,Message -Last 500 | ConvertTo-Json -Compress\""
+)
 
 
 def _f(x, default=None):
@@ -189,6 +192,8 @@ class LogPoller:
         cfg = self.cfg.log
         if cfg.source == "file":
             cmd = BOOT_BLOCK_CMD_FILE.format(path=cfg.path or "")
+        elif cfg.source == "windows_eventlog":
+            cmd = BOOT_BLOCK_CMD_WIN
         else:
             cmd = BOOT_BLOCK_CMD.format(unit=cfg.unit)
         out = await self.ssh.exec_command(cmd)
@@ -199,19 +204,37 @@ class LogPoller:
             self._parse_boot_line(m.group(5) if m else line)
 
     def _follow_cmd(self) -> str:
-        """按日志源（journal | file）构造流式跟随命令。"""
+        """按日志源（journal | file | windows_eventlog）构造流式跟随命令。"""
         cfg = self.cfg.log
         if cfg.source == "file":
             path = cfg.path or ""
+            # 检测是否是 Windows 路径（包含盘符如 C:\ 或 E:\）
+            is_windows_path = len(path) >= 2 and path[1] == ':'
+            if is_windows_path:
+                # Windows: 使用 PowerShell 的 Get-Content -Wait
+                if self._last_line_ts is not None:
+                    # 重连后读取最后 200 行
+                    return 'powershell -NoProfile -Command "Get-Content \\"%s\\" -Tail 200 -Wait"' % path.replace('\\', '\\\\')
+                return 'powershell -NoProfile -Command "Get-Content \\"%s\\" -Wait"' % path.replace('\\', '\\\\')
+            else:
+                # Linux: 使用 tail -F
+                if self._last_line_ts is not None:
+                    # 重连后补拉最近 200 行防丢行
+                    return "tail -n 200 -F %s" % path
+                return "tail -n 0 -F %s" % path
+        elif cfg.source == "windows_eventlog":
+            # Windows 事件日志：使用 Get-WinEvent 实时监控
             if self._last_line_ts is not None:
-                # 重连后补拉最近 200 行防丢行
-                return "tail -n 200 -F %s" % path
-            return "tail -n 0 -F %s" % path
-        unit = cfg.unit
-        if self._last_line_ts is not None:
-            since = int(time.time()) - cfg.catchup_sec
-            return "journalctl -u %s -o short-iso --no-pager --since '@%d' -f" % (unit, since)
-        return "journalctl -u %s -o short-iso --no-pager -f -n 0" % unit
+                since = int(self._last_line_ts) - cfg.catchup_sec
+                return "powershell -NoProfile -Command \"Get-WinEvent -FilterHashtable {{LogName='Application'; StartTime=(Get-Date).AddSeconds(-{0})}} -MaxEvents 1000 | Where-Object {{ $_.Message -like '*llama-server*' }} | Format-List TimeCreated,Message\"".format(cfg.catchup_sec)
+            return "powershell -NoProfile -Command \"Get-WinEvent -LogName Application -MaxEvents 100 | Where-Object {{ $_.Message -like '*llama-server*' }} | Format-List TimeCreated,Message\""
+        else:
+            # journal 模式
+            unit = cfg.unit
+            if self._last_line_ts is not None:
+                since = int(time.time()) - cfg.catchup_sec
+                return "journalctl -u %s -o short-iso --no-pager --since '@%d' -f" % (unit, since)
+            return "journalctl -u %s -o short-iso --no-pager -f -n 0" % unit
 
     async def _follow(self) -> None:
         """流式跟随日志（journal 或 file）；channel 断开后由 start() 循环重连并补拉。"""
@@ -292,30 +315,52 @@ class LogPoller:
     async def _poll_file_once(self) -> None:
         """file 模式周期拉取：按字节偏移读新增内容（处理轮转/截断）。"""
         path = self.cfg.log.path or ""
-        size_out = await self.ssh.exec_command(
-            "stat -c %%s %s 2>/dev/null || echo 0" % path)
+        
+        # 检测是否是 Windows 路径（包含盘符如 C:\ 或 E:\）
+        is_windows_path = len(path) >= 2 and path[1] == ':'
+        
+        if is_windows_path:
+            # Windows: 使用 PowerShell 读取文件
+            size_cmd = 'powershell -NoProfile -Command "(Get-Item \\"%s\\" -ErrorAction SilentlyContinue).Length" 2>/dev/null' % path.replace('\\', '\\\\')
+            size_out = await self.ssh.exec_command(size_cmd)
+        else:
+            size_out = await self.ssh.exec_command(
+                "stat -c %%s %s 2>/dev/null || echo 0" % path)
+        
         if size_out is None:
             self.available = False
             self.state["available"] = False
             return
+        
         try:
             size = int(size_out.strip() or 0)
         except ValueError:
             size = 0
+        
         if self._file_offset is None:
             # 首次：从当前文件末尾开始，只读新增内容
             self._file_offset = size
             self.available = True
             self.state["available"] = True
             return
+        
         if size < self._file_offset:
             # 文件轮转/截断：跳过已有内容，从新文件末尾继续读，避免整文件重读
             self._file_offset = size
+        
         self.available = True
         self.state["available"] = True
+        
         if size > self._file_offset:
-            out = await self.ssh.exec_command(
-                "tail -c +%d %s 2>/dev/null" % (self._file_offset + 1, path))
+            if is_windows_path:
+                # Windows: 使用 PowerShell 读取文件新增内容
+                read_cmd = 'powershell -NoProfile -Command "$bytes = [System.IO.File]::ReadAllBytes(\\"%s\\"); if ($bytes.Length -gt %d) { [System.Text.Encoding]::UTF8.GetString($bytes[%d..$($bytes.Length-1)]) }" 2>/dev/null' % (
+                    path.replace('\\', '\\\\'), self._file_offset, self._file_offset)
+                out = await self.ssh.exec_command(read_cmd)
+            else:
+                out = await self.ssh.exec_command(
+                    "tail -c +%d %s 2>/dev/null" % (self._file_offset + 1, path))
+            
             self._file_offset = size
             if out is not None:
                 for line in out.splitlines():

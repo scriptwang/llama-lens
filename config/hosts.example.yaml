@@ -1,6 +1,9 @@
 # llama灵境 主机配置模板
 # 用法：cp config/hosts.example.yaml config/hosts.yaml 后填写。
 # config/hosts.yaml 与 .env 均含敏感信息，已被 .gitignore 排除，勿提交。
+#
+# 支持 Linux 和 Windows 被监控主机。
+# OS 类型会自动检测，也可以通过 os_type 手动指定（"linux" 或 "windows"）。
 
 global:
   push_interval: 1.0          # WS 推送间隔（秒）
@@ -12,6 +15,7 @@ global:
   #   ctx: {warn: 80, danger: 90}
 
 hosts:
+  # Linux 主机示例
   - id: ai
     name: AI 主机 (ai.lan)
     llama:
@@ -41,5 +45,37 @@ hosts:
     disk_mounts:              # 监控的挂载点（df 采集）
       - /
       - /share
+    # os_type: linux          # 可选：手动指定 OS 类型（自动检测时忽略）
     # thresholds:             # 每主机阈值覆盖（可选）
     #   mtp: {warn: 80, danger: 65}
+
+  # Windows 主机示例
+  - id: win-host
+    name: Windows Host (win.lan)
+    os_type: windows          # 手动指定为 Windows（可省略，将自动检测）
+    llama:
+      host: win.lan
+      port: 8080
+      interval: 1.0
+      slow_interval: 30.0
+      timeout: 3.0
+    ssh:
+      host: win.lan
+      port: 22
+      user: Administrator     # Windows 默认管理员用户
+      password: ${WIN_SSH_PASS}
+      interval: 2.0
+      keepalive: 15
+      timeout: 15.0
+    process:
+      name: llama-server      # PowerShell 进程名（不含 .exe）
+    systemd_unit: llama-server.service  # Windows 下用作服务显示名
+    log:
+      source: file            # Windows 建议使用 file 模式
+      # path: C:\Program Files\llama-server\logs\llama-server.log  # 日志文件路径
+      path: ${LOG_PATH}       # 或从环境变量读取
+      follow: true
+      catchup_sec: 30
+    disk_mounts:              # Windows 使用盘符（如 C:\, D:\）
+      - C:\
+      - D:\
