@@ -78,10 +78,10 @@ hosts:
       timeout: 15.0
     process:
       name: llama-server      # 进程名（pgrep -x）
-    systemd_unit: llama-server.service
+    systemd_unit: llama-server-qwen3.6.service
     log:
       source: journal         # journal（systemd unit）| file（日志文件，非 systemd 环境用）
-      unit: llama-server      # systemd unit 名（source=journal 时生效）
+      unit: llama-server-qwen3.6      # systemd unit 名（source=journal 时生效）
       # path: /var/log/llama-server.log   # 日志文件路径（source=file 时必填）
       follow: true            # 流式跟随；false 时改为 2s 周期拉取
       catchup_sec: 30         # 重连后补拉秒数（file 模式重连补拉 200 行）
