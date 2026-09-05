@@ -96,6 +96,10 @@ class HostMonitor:
                 online = any(llama.state.get("online") for llama in self.llamas)
                 self.ring_llama.push("gen_speed", now, gen if online else None)
                 self.ring_llama.push("prompt_speed", now, prompt if online else None)
+                # vLLM MTP 接受率写入环形缓冲（供历史曲线使用）
+                if self.vllm is not None and self.vllm.state.get("online"):
+                    mtp_rate = self.vllm.state.get("mtp_acceptance_rate")
+                    self.ring_llama.push("mtp_acceptance", now, mtp_rate)
                 self._snapshot = self._build_snapshot(gen, prompt)
                 # 上下文占用 1s 采样（API 实时值优先、日志兜底，取自合并后快照）；
                 # 任务结束点由 LogPoller 另行写入（权威值），离线写 None 形成断点
@@ -105,7 +109,7 @@ class HostMonitor:
                 log.exception("[%s] tick 失败", self.cfg.id)
 
     def _speeds(self):
-        """速度来源优先级：日志 tg_3s / prompt 行 > /slots 差分。合并所有端口。"""
+        """速度来源优先级：日志 tg_3s / prompt 行 > vLLM total_prompt_tps > /slots 差分。合并所有端口。"""
         gen_total = 0.0
         prompt_total = 0.0
         for llama in self.llamas:
@@ -115,6 +119,14 @@ class HostMonitor:
                 prompt_total += state.get("prompt_speed_tps") or 0.0
         gen = gen_total
         prompt = prompt_total
+        # vLLM 速度源（当 llama 端口未在线时作为主要速度源）
+        if self.vllm is not None and self.vllm.state.get("online"):
+            vllm_gen = self.vllm.state.get("total_gen_tps") or 0.0
+            vllm_prompt = self.vllm.state.get("total_prompt_tps") or 0.0
+            if vllm_gen > 0:
+                gen = vllm_gen  # vLLM 生成速度优先
+            if vllm_prompt > 0:
+                prompt = vllm_prompt  # vLLM prefill 速度优先
         logst = self.log_poller.state
         st = logst.get("state") or {}
         if logst.get("available"):

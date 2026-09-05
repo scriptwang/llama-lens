@@ -285,26 +285,37 @@ class VllmPoller:
             log.debug("[%s] 提取到 %d 个请求的统计", self.cfg.id, len(st["requests"]))
 
         # ---- MTP / 投机解码统计 ----
-        st["mtp_acceptance_rate"] = _to_float(raw.get("vllm:spec_decode_mtp_acceptance_rate", {}).get("value"))
-        
-        # 从 Counter 指标获取 MTP 数据（1Cat-vLLM 指标名称）
-        draft_tokens_entry = raw.get("vllm:spec_decode_num_draft_tokens", {})
+        # 注意：vLLM 的 Counter 指标带 _total 后缀
+        # 实际指标名: vllm:spec_decode_num_draft_tokens_total, vllm:spec_decode_num_accepted_tokens_total
+        # 不存在 vllm:spec_decode_mtp_acceptance_rate / mtp_mean_len / success_rate
+
+        # 接受率 = accepted / draft_tokens (从 Counter 差分计算)
+        mtp_acceptance_rate = None
+        draft_tokens_entry = raw.get("vllm:spec_decode_num_draft_tokens_total", {})
         draft_tokens = _to_int(draft_tokens_entry.get("value"))
         
-        accepted_tokens_entry = raw.get("vllm:spec_decode_num_accepted_tokens", {})
+        accepted_tokens_entry = raw.get("vllm:spec_decode_num_accepted_tokens_total", {})
         accepted_tokens = _to_int(accepted_tokens_entry.get("value"))
         
-        mtp_mean_len = _to_float(raw.get("vllm:spec_decode_mtp_mean_len", {}).get("value"))
-        mtp_tps = _to_float(raw.get("vllm:spec_decode_success_rate", {}).get("value"))
+        # 从累计值计算接受率（如果没有独立的 acceptance_rate 指标）
+        if draft_tokens > 0 and accepted_tokens > 0:
+            mtp_acceptance_rate = accepted_tokens / draft_tokens
         
+        st["mtp_acceptance_rate"] = mtp_acceptance_rate
         st["mtp_accepted"] = accepted_tokens
         st["mtp_generated"] = draft_tokens
-        st["mtp_mean_len"] = mtp_mean_len
-        st["mtp_spec_decode_tps"] = mtp_tps
+        st["mtp_mean_len"] = None  # 服务器未提供此指标
+        st["mtp_spec_decode_tps"] = None  # 服务器未提供此指标
         
-        # 计算接受率（如果没有直接指标）
-        if st["mtp_acceptance_rate"] is None and draft_tokens and accepted_tokens:
-            st["mtp_acceptance_rate"] = accepted_tokens / draft_tokens if draft_tokens > 0 else None
+        # 打印 accepted/token 位置分布用于调试
+        if draft_tokens > 0:
+            accept_pos_series = raw.get("vllm:spec_decode_num_accepted_tokens_per_pos_total", {}).get("series", [])
+            if accept_pos_series:
+                total_by_pos = sum(v for _, v in accept_pos_series)
+                log.debug("[%s] MTP: accepted=%d/draft=%d=%.1f%%, by_pos_total=%d",
+                         self.cfg.id, accepted_tokens, draft_tokens,
+                         mtp_acceptance_rate * 100 if mtp_acceptance_rate else 0,
+                         total_by_pos)
 
         # 调试：打印 raw 中所有指标名称（首次或首次有数据时）
         if not hasattr(self, '_debugged_metrics'):
