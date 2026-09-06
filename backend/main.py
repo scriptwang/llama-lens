@@ -5,6 +5,7 @@
 - 日志：stdout + logs/llamalens.log（INFO）。
 - 兼容 Python 3.9。
 """
+import asyncio
 import logging
 import os
 import queue
@@ -19,6 +20,7 @@ from fastapi.responses import FileResponse
 from .api import router as api_router
 from .config import load_config
 from .ctl.errors import ApiError, api_error_handler
+from .ctl.hostsync import import_from_yaml_if_empty, load_hosts_from_db
 from .ctl.main import ctl_routers, init_ctl, shutdown_ctl
 from .monitor import MonitorRegistry
 from .ws import router as ws_router
@@ -89,17 +91,24 @@ def create_app(base_dir: Optional[str] = None) -> FastAPI:
     try:
         app_cfg = load_config(base_dir)
     except FileNotFoundError:
-        log.warning("config/hosts.yaml 不存在，以空主机列表启动（cp config/hosts.example.yaml config/hosts.yaml）")
+        log.warning("config/hosts.yaml 不存在，使用默认全局配置（主机列表以数据库为准）")
         from .config import AppConfig, GlobalConfig
         app_cfg = AppConfig(global_cfg=GlobalConfig(), hosts=[])
+
+    # 主机统一存数据库：初始化 → 首次从 hosts.yaml 导入 → 从 DB 加载
+    init_ctl()
+    imported = import_from_yaml_if_empty(app_cfg)
+    if imported:
+        log.info("已从 config/hosts.yaml 导入 %d 台主机（主机管理已迁移到界面，yaml 仅保留全局配置）", imported)
+    app_cfg.hosts = load_hosts_from_db(app_cfg.global_cfg)
 
     registry = MonitorRegistry(app_cfg)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        app.state.loop = asyncio.get_running_loop()
         log.info("llama灵境 启动：端口 %d，主机 %s", app_cfg.port,
                  [h.id for h in app_cfg.hosts] or "(无)")
-        init_ctl()
         await registry.start()
         try:
             yield

@@ -34,11 +34,6 @@ async def panel_health(request: Request):
     return {"status": "ok", "hosts": hosts}
 
 
-@router.get("/hosts")
-async def list_hosts(request: Request):
-    return _registry(request).list()
-
-
 @router.get("/hosts/{host_id}/overview")
 async def host_overview(request: Request, host_id: str):
     return _monitor(request, host_id).snapshot()

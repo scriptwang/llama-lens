@@ -202,7 +202,7 @@ def _build_host(d: dict, global_t: dict) -> HostConfig:
         process_name=process_name,
         log=_build_log(d.get("log")),
         disk_mounts=[str(x) for x in (d.get("disk_mounts") or ["/"])],
-        systemd_unit=d.get("systemd_unit", "llama-server.service"),
+        systemd_unit=d.get("systemd_unit") or "llama-server.service",
         thresholds=merge_thresholds(global_t, d.get("thresholds") or {}),
     )
 

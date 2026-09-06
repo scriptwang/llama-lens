@@ -237,6 +237,7 @@ class MonitorRegistry:
     def __init__(self, app_cfg: AppConfig):
         self.app_cfg = app_cfg
         self.monitors: Dict[str, HostMonitor] = {}
+        self._lock = asyncio.Lock()
         for h in app_cfg.hosts:
             self.monitors[h.id] = HostMonitor(h, app_cfg.global_cfg)
 
@@ -253,3 +254,40 @@ class MonitorRegistry:
 
     def list(self) -> List[Dict[str, Any]]:
         return [m.portal_summary() for m in self.monitors.values()]
+
+    # ------------------------------------------------------------------
+    # 运行时增删（主机管理 CRUD 触发）
+    # ------------------------------------------------------------------
+    async def add_host(self, cfg: "HostConfig") -> HostMonitor:
+        """新增主机监控（幂等：已存在则先停旧再启新）。"""
+        async with self._lock:
+            old = self.monitors.pop(cfg.id, None)
+            if old is not None:
+                await old.stop()
+            m = HostMonitor(cfg, self.app_cfg.global_cfg)
+            self.monitors[cfg.id] = m
+            await m.start()
+            log.info("HostMonitor 动态添加: %s", cfg.id)
+            return m
+
+    async def remove_host(self, host_id: str) -> bool:
+        """移除主机监控；返回是否移除成功。"""
+        async with self._lock:
+            m = self.monitors.pop(host_id, None)
+            if m is None:
+                return False
+            await m.stop()
+            log.info("HostMonitor 动态移除: %s", host_id)
+            return True
+
+    async def restart_host(self, cfg: "HostConfig") -> HostMonitor:
+        """监控配置变更后重建（等价 remove + add，持锁保证原子）。"""
+        async with self._lock:
+            old = self.monitors.pop(cfg.id, None)
+            if old is not None:
+                await old.stop()
+            m = HostMonitor(cfg, self.app_cfg.global_cfg)
+            self.monitors[cfg.id] = m
+            await m.start()
+            log.info("HostMonitor 动态重建: %s", cfg.id)
+            return m

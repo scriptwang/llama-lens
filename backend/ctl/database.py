@@ -6,6 +6,7 @@ from .config import settings
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS hosts (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  mid           TEXT    NOT NULL DEFAULT '' UNIQUE,
   alias         TEXT    NOT NULL DEFAULT '',
   host          TEXT    NOT NULL,
   port          INTEGER NOT NULL DEFAULT 22,
@@ -13,7 +14,26 @@ CREATE TABLE IF NOT EXISTS hosts (
   encrypted_pwd TEXT,
   auth_type     TEXT    NOT NULL DEFAULT 'password',
   key_passphrase_enc TEXT,
+  key_path      TEXT,
   browse_paths  TEXT    NOT NULL DEFAULT '',
+  monitor_enabled INTEGER NOT NULL DEFAULT 1,
+  llama_host    TEXT    NOT NULL DEFAULT '',
+  llama_port    INTEGER NOT NULL DEFAULT 8080,
+  llama_interval REAL   NOT NULL DEFAULT 1.0,
+  llama_slow_interval REAL NOT NULL DEFAULT 30.0,
+  llama_timeout REAL    NOT NULL DEFAULT 3.0,
+  ssh_interval  REAL    NOT NULL DEFAULT 2.0,
+  ssh_keepalive INTEGER NOT NULL DEFAULT 15,
+  ssh_timeout   REAL    NOT NULL DEFAULT 15.0,
+  process_name  TEXT    NOT NULL DEFAULT 'llama-server',
+  systemd_unit  TEXT    NOT NULL DEFAULT 'llama-server.service',
+  log_source    TEXT    NOT NULL DEFAULT 'journal',
+  log_unit      TEXT    NOT NULL DEFAULT 'llama-server',
+  log_path      TEXT,
+  log_follow    INTEGER NOT NULL DEFAULT 1,
+  log_catchup_sec INTEGER NOT NULL DEFAULT 30,
+  disk_mounts   TEXT    NOT NULL DEFAULT '["/"]',
+  thresholds    TEXT,
   created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
   last_connected_at TEXT,
   UNIQUE (host, port, username)
@@ -58,13 +78,47 @@ def get_conn() -> sqlite3.Connection:
     return _conn
 
 
+# 旧库迁移：新增列（列名 -> DDL 片段）
+_HOSTS_MIGRATIONS = {
+    "mid": "ALTER TABLE hosts ADD COLUMN mid TEXT NOT NULL DEFAULT ''",
+    "key_path": "ALTER TABLE hosts ADD COLUMN key_path TEXT",
+    "monitor_enabled": "ALTER TABLE hosts ADD COLUMN monitor_enabled INTEGER NOT NULL DEFAULT 1",
+    "llama_host": "ALTER TABLE hosts ADD COLUMN llama_host TEXT NOT NULL DEFAULT ''",
+    "llama_port": "ALTER TABLE hosts ADD COLUMN llama_port INTEGER NOT NULL DEFAULT 8080",
+    "llama_interval": "ALTER TABLE hosts ADD COLUMN llama_interval REAL NOT NULL DEFAULT 1.0",
+    "llama_slow_interval": "ALTER TABLE hosts ADD COLUMN llama_slow_interval REAL NOT NULL DEFAULT 30.0",
+    "llama_timeout": "ALTER TABLE hosts ADD COLUMN llama_timeout REAL NOT NULL DEFAULT 3.0",
+    "ssh_interval": "ALTER TABLE hosts ADD COLUMN ssh_interval REAL NOT NULL DEFAULT 2.0",
+    "ssh_keepalive": "ALTER TABLE hosts ADD COLUMN ssh_keepalive INTEGER NOT NULL DEFAULT 15",
+    "ssh_timeout": "ALTER TABLE hosts ADD COLUMN ssh_timeout REAL NOT NULL DEFAULT 15.0",
+    "process_name": "ALTER TABLE hosts ADD COLUMN process_name TEXT NOT NULL DEFAULT 'llama-server'",
+    "systemd_unit": "ALTER TABLE hosts ADD COLUMN systemd_unit TEXT NOT NULL DEFAULT 'llama-server.service'",
+    "log_source": "ALTER TABLE hosts ADD COLUMN log_source TEXT NOT NULL DEFAULT 'journal'",
+    "log_unit": "ALTER TABLE hosts ADD COLUMN log_unit TEXT NOT NULL DEFAULT 'llama-server'",
+    "log_path": "ALTER TABLE hosts ADD COLUMN log_path TEXT",
+    "log_follow": "ALTER TABLE hosts ADD COLUMN log_follow INTEGER NOT NULL DEFAULT 1",
+    "log_catchup_sec": "ALTER TABLE hosts ADD COLUMN log_catchup_sec INTEGER NOT NULL DEFAULT 30",
+    "disk_mounts": "ALTER TABLE hosts ADD COLUMN disk_mounts TEXT NOT NULL DEFAULT '[''/'']'",
+    "thresholds": "ALTER TABLE hosts ADD COLUMN thresholds TEXT",
+}
+
+
 def init_db() -> None:
     conn = get_conn()
     with _lock:
         conn.executescript(SCHEMA)
         cols = [r["name"] for r in conn.execute("PRAGMA table_info(hosts)").fetchall()]
-        if "browse_paths" not in cols:
-            conn.execute("ALTER TABLE hosts ADD COLUMN browse_paths TEXT NOT NULL DEFAULT ''")
+        for col, ddl in _HOSTS_MIGRATIONS.items():
+            if col not in cols:
+                conn.execute(ddl)
+        # mid 唯一索引（旧数据 mid 为空时不冲突：SQLite 唯一索引允许多个 NULL/空串？
+        # 空串会冲突，故先给旧行补唯一 mid，再建索引）
+        empty = conn.execute("SELECT id FROM hosts WHERE mid IS NULL OR mid = ''").fetchall()
+        for i, r in enumerate(empty):
+            conn.execute("UPDATE hosts SET mid = ? WHERE id = ?", ("host-%d" % r["id"], r["id"]))
+        idx = [r["name"] for r in conn.execute("PRAGMA index_list(hosts)").fetchall()]
+        if "idx_hosts_mid" not in idx:
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_hosts_mid ON hosts(mid)")
         conn.commit()
 
 
