@@ -21,8 +21,9 @@ class EventDetector:
     # API 源任务结束事件的宽限期：等日志源补全完整统计（MTP/上下文）
     TASK_END_GRACE_S = 2.0
 
-    def __init__(self, maxlen: int = 200):
+    def __init__(self, maxlen: int = 200, sink=None):
         self.events: deque = deque(maxlen=maxlen)
+        self._sink = sink  # 可选持久化回调 sink(event_dict)
         self._llama_online: Optional[bool] = None
         self._ssh_connected: Optional[bool] = None
         self._task_running: bool = False
@@ -35,12 +36,18 @@ class EventDetector:
 
     # ------------------------------------------------------------------
     def emit(self, ts: Optional[float], level: str, type_: str, msg: str) -> None:
-        self.events.append({
+        ev = {
             "ts": ts if ts is not None else time.time(),
             "level": level,
             "type": type_,
             "msg": msg,
-        })
+        }
+        self.events.append(ev)
+        if self._sink is not None:
+            try:
+                self._sink(ev)
+            except Exception:
+                pass  # 持久化失败不影响事件检测
 
     def set_llama_online(self, ts: float, online: bool, model_name: str = "") -> None:
         if self._llama_online is None:

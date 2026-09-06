@@ -29,13 +29,14 @@ GPU_PREFIXES = ("gpu_util_", "gpu_mem_", "gpu_temp_", "gpu_power_")
 
 
 class HostMonitor:
-    def __init__(self, cfg: HostConfig, global_cfg: GlobalConfig):
+    def __init__(self, cfg: HostConfig, global_cfg: GlobalConfig, writer=None):
         self.cfg = cfg
         self.global_cfg = global_cfg
-        self.events = EventDetector()
+        self.writer = writer
+        self.events = EventDetector(sink=self._event_sink)
         self.diff = DiffEngine()
-        self.ring_llama = RingBuffer(global_cfg.llama_points)
-        self.ring_host = RingBuffer(global_cfg.host_points)
+        self.ring_llama = RingBuffer(global_cfg.llama_points, sink=self._llama_sink)
+        self.ring_host = RingBuffer(global_cfg.host_points, sink=self._host_sink)
         self.ssh = SshConnection(cfg.ssh, self.events, cfg.id)
         self.llama = LlamaPoller(cfg, self.events)
         self.ssh_poller = SshPoller(cfg, self.ssh, self.diff, self.ring_host, self.events)
@@ -45,6 +46,19 @@ class HostMonitor:
         self._stopped = False
         self._last_cmdline: Optional[str] = None
         self._flags: Dict[str, Any] = {}
+
+    # ------------------------------------------------------------------
+    def _llama_sink(self, name: str, ts: float, value) -> None:
+        if self.writer is not None:
+            self.writer.enqueue_llama(self.cfg.id, ts, name, value)
+
+    def _host_sink(self, name: str, ts: float, value) -> None:
+        if self.writer is not None:
+            self.writer.enqueue_host(self.cfg.id, ts, name, value)
+
+    def _event_sink(self, ev: Dict[str, Any]) -> None:
+        if self.writer is not None:
+            self.writer.enqueue_event(self.cfg.id, ev)
 
     # ------------------------------------------------------------------
     async def start(self) -> None:
@@ -234,12 +248,13 @@ class HostMonitor:
 
 
 class MonitorRegistry:
-    def __init__(self, app_cfg: AppConfig):
+    def __init__(self, app_cfg: AppConfig, writer=None):
         self.app_cfg = app_cfg
+        self.writer = writer
         self.monitors: Dict[str, HostMonitor] = {}
         self._lock = asyncio.Lock()
         for h in app_cfg.hosts:
-            self.monitors[h.id] = HostMonitor(h, app_cfg.global_cfg)
+            self.monitors[h.id] = HostMonitor(h, app_cfg.global_cfg, writer)
 
     async def start(self) -> None:
         for m in self.monitors.values():
@@ -264,7 +279,7 @@ class MonitorRegistry:
             old = self.monitors.pop(cfg.id, None)
             if old is not None:
                 await old.stop()
-            m = HostMonitor(cfg, self.app_cfg.global_cfg)
+            m = HostMonitor(cfg, self.app_cfg.global_cfg, self.writer)
             self.monitors[cfg.id] = m
             await m.start()
             log.info("HostMonitor 动态添加: %s", cfg.id)
@@ -286,7 +301,7 @@ class MonitorRegistry:
             old = self.monitors.pop(cfg.id, None)
             if old is not None:
                 await old.stop()
-            m = HostMonitor(cfg, self.app_cfg.global_cfg)
+            m = HostMonitor(cfg, self.app_cfg.global_cfg, self.writer)
             self.monitors[cfg.id] = m
             await m.start()
             log.info("HostMonitor 动态重建: %s", cfg.id)

@@ -22,6 +22,7 @@ from .config import load_config
 from .ctl.errors import ApiError, api_error_handler
 from .ctl.hostsync import import_from_yaml_if_empty, load_hosts_from_db
 from .ctl.main import ctl_routers, init_ctl, shutdown_ctl
+from .history import HistoryStore, HistoryWriter
 from .monitor import MonitorRegistry
 from .ws import router as ws_router
 
@@ -102,7 +103,31 @@ def create_app(base_dir: Optional[str] = None) -> FastAPI:
         log.info("已从 config/hosts.yaml 导入 %d 台主机（主机管理已迁移到界面，yaml 仅保留全局配置）", imported)
     app_cfg.hosts = load_hosts_from_db(app_cfg.global_cfg)
 
-    registry = MonitorRegistry(app_cfg)
+    # 历史持久化（SQLite 两级存储；enabled=false 时退回纯内存）
+    history_store = None
+    history_writer = None
+    if app_cfg.global_cfg.history_enabled:
+        db_path = app_cfg.global_cfg.history_db_path
+        if not os.path.isabs(db_path):
+            db_path = os.path.join(base_dir, db_path)
+        try:
+            history_store = HistoryStore(db_path)
+            history_writer = HistoryWriter(
+                history_store,
+                flush_interval=app_cfg.global_cfg.history_flush_interval,
+                raw_days=app_cfg.global_cfg.history_raw_days,
+                agg_days=app_cfg.global_cfg.history_agg_days,
+                events_days=app_cfg.global_cfg.history_events_days,
+            )
+            log.info("历史存储已启用: %s（原始 %dd / 聚合 %dd / 事件 %dd）",
+                     db_path, app_cfg.global_cfg.history_raw_days,
+                     app_cfg.global_cfg.history_agg_days,
+                     app_cfg.global_cfg.history_events_days)
+        except Exception:
+            log.exception("历史存储初始化失败，退回纯内存模式")
+            history_store, history_writer = None, None
+
+    registry = MonitorRegistry(app_cfg, history_writer)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -114,11 +139,16 @@ def create_app(base_dir: Optional[str] = None) -> FastAPI:
             yield
         finally:
             await registry.stop()
+            if history_writer is not None:
+                history_writer.close()
+            if history_store is not None:
+                history_store.close()
             shutdown_ctl()
             log.info("llama灵境 已停止")
 
     app = FastAPI(title="llama灵境", lifespan=lifespan)
     app.state.registry = registry
+    app.state.history = history_store
     app.include_router(api_router)
     app.include_router(ws_router)
     for r in ctl_routers:

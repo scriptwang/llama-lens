@@ -129,6 +129,13 @@ class GlobalConfig:
     llama_points: int = 3600     # llama 指标环形缓冲点数 @1s（1h）
     host_points: int = 1800      # host 指标环形缓冲点数 @2s（1h）
     thresholds: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    # 历史持久化（SQLite 两级存储，详见 docs/05）
+    history_enabled: bool = True
+    history_db_path: str = "data/history.db"   # 相对 base_dir
+    history_raw_days: int = 7
+    history_agg_days: int = 90
+    history_events_days: int = 30
+    history_flush_interval: float = 5.0
 
 
 @dataclass
@@ -218,11 +225,18 @@ def load_config(base_dir: str, env_file: Optional[str] = None,
         raw = yaml.safe_load(f) or {}
 
     g_raw = raw.get("global") or {}
+    h_raw = g_raw.get("history") or {}
     global_cfg = GlobalConfig(
         push_interval=float(g_raw.get("push_interval", 1.0)),
-        llama_points=int((g_raw.get("history") or {}).get("llama_points", 3600)),
-        host_points=int((g_raw.get("history") or {}).get("host_points", 1800)),
+        llama_points=int(h_raw.get("llama_points", 3600)),
+        host_points=int(h_raw.get("host_points", 1800)),
         thresholds=g_raw.get("thresholds") or {},
+        history_enabled=bool(h_raw.get("enabled", True)),
+        history_db_path=str(h_raw.get("db_path", "data/history.db")),
+        history_raw_days=int(h_raw.get("raw_retention_days", 7)),
+        history_agg_days=int(h_raw.get("agg_retention_days", 90)),
+        history_events_days=int(h_raw.get("events_retention_days", 30)),
+        history_flush_interval=float(h_raw.get("flush_interval", 5.0)),
     )
 
     hosts = [_build_host(h, global_cfg.thresholds) for h in (raw.get("hosts") or [])]

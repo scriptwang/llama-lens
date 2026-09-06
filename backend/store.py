@@ -10,9 +10,10 @@ from typing import Dict, List, Optional, Tuple
 
 
 class RingBuffer:
-    def __init__(self, maxlen: int):
+    def __init__(self, maxlen: int, sink=None):
         self.maxlen = maxlen
         self._series: Dict[str, deque] = {}
+        self._sink = sink  # 可选持久化回调 sink(name, ts, value)
 
     def push(self, name: str, ts: float, value) -> None:
         dq = self._series.get(name)
@@ -20,6 +21,11 @@ class RingBuffer:
             dq = deque(maxlen=self.maxlen)
             self._series[name] = dq
         dq.append((ts, value))
+        if self._sink is not None:
+            try:
+                self._sink(name, ts, value)
+            except Exception:
+                pass  # 持久化失败不影响实时链路
 
     def get(self, name: str) -> List[Tuple[float, object]]:
         dq = self._series.get(name)
