@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 # llama灵境 启动脚本：构建前端（若缺失）+ 启动 FastAPI 单进程
+# v2.0：主机统一存数据库（data/llama_ctl.db），首次启动自动从 config/hosts.yaml 导入（若存在）
 set -euo pipefail
 cd "$(dirname "$0")"
 
 if [ ! -f config/hosts.yaml ]; then
-  echo "错误：config/hosts.yaml 不存在。" >&2
-  echo "请先执行：cp config/hosts.example.yaml config/hosts.yaml 并填写主机信息" >&2
-  echo "同时：cp .env.example .env 填写 SSH 密码" >&2
-  exit 1
+  echo "提示：config/hosts.yaml 不存在（可选）。"
+  echo "      主机请在界面【主机管理】中添加；老用户可 cp config/hosts.example.yaml config/hosts.yaml 自动导入。"
 fi
 
 if [ ! -f frontend/dist/index.html ]; then

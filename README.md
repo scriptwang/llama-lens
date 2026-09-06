@@ -1,11 +1,15 @@
-# llama灵境
+# LlamaLens（llama灵境）
 
-llama.cpp llama-server 多主机实时监控面板（英文名：LlamaLens）。
+llama.cpp llama-server 多主机**监控 + 管理**综合面板（英文名：LlamaLens）。
 
 - **门户页**：所有主机状态一览（状态/模型/token 速度/GPU/CPU/内存）
 - **单主机详情**：token 速度 / GPU 按卡聚合 / CPU（每核）/ 内存 / 磁盘 / 网络 / 进程 / 模型 / Slot / 事件流，80+ 数据项
 - **实时**：WebSocket 1s 推送（可配置 1s/2s/5s/暂停），断线自动降级轮询
 - **阈值飘红**：黄/红两级色阶，可按主机配置
+- **主机管理**（v2.0）：界面增删改主机，SSH 凭证加密入库，改动即时生效免重启
+- **服务管理**（v2.0）：主机 systemd unit 扫描 / 新建 / 编辑（Monaco）/ 启停重启 / 日志
+- **数据持久化**（v2.0）：监控历史 SQLite 两级存储（原始 7 天 + 1 分钟聚合 90 天 + 事件 30 天），重启不丢数据
+- **鉴权**（v2.0）：本地账号 + JWT，初始管理员密码首次启动打印
 - **9 套主题**：Aurora / Terminal / Light / Monokai / Nord / Dracula / Synthwave '84 / Tokyo Night / Matrix
 - **部署**：原生单进程或 Docker 镜像，二选一
 
@@ -17,6 +21,9 @@ llama.cpp llama-server 多主机实时监控面板（英文名：LlamaLens）。
 
 ![alt text](docs/image-2.png)
 ## 当前状态
+
+✅ **v2.0.0**（2026-09-06）—— 合并 LlamaCtl-Web 管理能力：主机管理（界面增删改 + 凭证加密存储）+ 服务管理（systemd 扫描/新建/编辑/启停/日志）；
+主机数据统一 SQLite（单一数据源，hosts.yaml 一次性导入）；监控数据持久化（重启不丢）；统一 JWT 鉴权。详见 [docs/04](docs/04-合并方案.md)、[docs/05](docs/05-监控数据持久化方案.md)。
 
 ✅ **v1.0.0**（2026-08-29）—— 首个发布版本。后端（FastAPI + SSH/HTTP 采集 + WS 推送）与前端（Vue 3 + ECharts）均已完成，
 `frontend/dist` 已构建，`./run.sh` 可直接启动。
@@ -32,11 +39,13 @@ llama.cpp llama-server 多主机实时监控面板（英文名：LlamaLens）。
 | [docs/01-需求文档.md](docs/01-需求文档.md) | 需求基线（后续开发主依据） |
 | [docs/02-架构设计文档.md](docs/02-架构设计文档.md) | 架构、采集、数据模型、API、部署 |
 | [docs/03-UI与交互设计文档.md](docs/03-UI与交互设计文档.md) | 视觉规范、页面布局、组件、交互 |
+| [docs/04-合并方案.md](docs/04-合并方案.md) | v2.0 合并方案：吸收 LlamaCtl-Web 管理能力 |
+| [docs/05-监控数据持久化方案.md](docs/05-监控数据持久化方案.md) | v2.0 监控数据持久化：SQLite 两级存储 + 容量评估 |
 
 ## 技术栈
 
-- 后端：Python 3.9+ + FastAPI + uvicorn + paramiko（SSH 只读采集）
-- 前端：Vue 3 + Vite + ECharts 5 + Vue Router
+- 后端：Python 3.9+ + FastAPI + uvicorn + paramiko（SSH 采集）+ SQLite（主机数据 + 监控历史）+ JWT/Fernet（鉴权与凭证加密）
+- 前端：Vue 3 + Vite + ECharts 5 + Element Plus + Monaco Editor + Pinia
 - 部署：单进程 :8000（FastAPI 托管前端构建产物），支持原生 / Docker
 
 ## 监控对象（首台主机）
@@ -60,8 +69,6 @@ llama.cpp llama-server 多主机实时监控面板（英文名：LlamaLens）。
 ### 方式一：原生部署
 
 ```bash
-cp config/hosts.example.yaml config/hosts.yaml   # 填写主机信息
-cp .env.example .env                              # 填写 SSH 密码
 pip3 install -r backend/requirements.txt
 cd frontend && npm install && npm run build       # 构建前端（已有 dist 可跳过）
 cd .. && ./run.sh                                 # http://<本机>:8000
@@ -70,10 +77,14 @@ cd .. && ./run.sh                                 # http://<本机>:8000
 ### 方式二：Docker 部署（推荐）
 
 ```bash
-cp config/hosts.example.yaml config/hosts.yaml   # 填写主机信息
-cp .env.example .env                              # 填写 SSH 密码
 docker compose up -d --build                      # http://<主机>:8000
 ```
+
+启动后：
+
+1. 用初始管理员账号登录（首次启动打印在日志：`[llamalens.ctl] 初始管理员账号: admin / <密码>`）
+2. 在界面【主机管理】中添加主机（名称、llama-server 地址、SSH 凭证）
+3. 老用户：`config/hosts.yaml` 存在时首次启动自动导入主机
 
 详细步骤见下文[使用教程](#使用教程)（含被监控主机的 systemd 配置）。
 
@@ -81,35 +92,43 @@ docker compose up -d --build                      # http://<主机>:8000
 
 ### 1. 配置
 
-#### 1.1 `.env` —— 凭证
+#### 1.1 鉴权与初始账号
 
-```bash
-cp .env.example .env
+- 默认开启鉴权：除 `/api/health` 与 `/api/auth/*` 外，所有 API/WS 需登录
+- 首次启动自动创建管理员账号，密码只打印一次（日志）：
+
+```
+[llamalens.ctl] 初始管理员账号: admin / <随机密码>
+[llamalens.ctl] （初始密码仅打印一次；如需重置可删除 data/llama_ctl.db 后重启）
 ```
 
-| 变量 | 必填 | 说明 |
-|---|---|---|
-| `AI_SSH_PASS` | 是（示例名） | SSH 密码，在 hosts.yaml 中以 `${AI_SSH_PASS}` 引用。变量名可任意，与 hosts.yaml 中的引用一致即可 |
-| `PORT` | 否 | 面板端口，默认 8000 |
+- JWT 有效期 24h；前端登录后缓存 token，过期自动跳登录页
+- 关闭鉴权（不推荐）：环境变量 `LLAMACTL_AUTH_ENABLED=false`
 
-`.env` 与 `config/hosts.yaml` 含敏感信息，已被 `.gitignore` 排除，勿提交。
+#### 1.2 `config/hosts.yaml` —— 全局配置 + 一次性导入（可选）
 
-#### 1.2 `config/hosts.yaml` —— 主机拓扑
+v2.0 主机数据统一存数据库（`data/llama_ctl.db`），在界面【主机管理】中维护。`config/hosts.yaml` 现为**可选**：
 
-```bash
-cp config/hosts.example.yaml config/hosts.yaml
-```
+- **老用户**：文件中声明的主机在首次启动时自动导入数据库（仅当数据库为空）；导入后文件只保留全局配置
+- **新用户**：无需创建，直接在界面添加主机
+
+> `.env` 仍受支持：一次性导入时 hosts.yaml 中 `ssh.password` 的 `${VAR}` 引用从 `.env` 解析。
+> `.env` 与 `config/hosts.yaml` 含敏感信息，已被 `.gitignore` 排除，勿提交。
 
 **global（全局）**
 
 | 字段 | 默认 | 说明 |
 |---|---|---|
 | `push_interval` | 1.0 | WS 推送间隔（秒） |
-| `history.llama_points` | 3600 | llama 序列环形缓冲点数（@1s，3600 = 1h） |
-| `history.host_points` | 1800 | host 序列环形缓冲点数（@2s，1800 = 1h） |
+| `history.enabled` | true | 是否启用监控数据持久化（SQLite） |
+| `history.raw_retention_days` | 7 | 原始数据（1s/2s）保留天数 |
+| `history.agg_retention_days` | 90 | 1 分钟聚合数据保留天数 |
+| `history.events_retention_days` | 30 | 事件保留天数 |
+| `history.llama_points` | 3600 | llama 序列内存环形缓冲点数（@1s，3600 = 1h） |
+| `history.host_points` | 1800 | host 序列内存环形缓冲点数（@2s，1800 = 1h） |
 | `thresholds` | — | 全局阈值覆盖（可选，见 1.4） |
 
-**hosts[]（每主机）**
+**hosts[]（每主机，仅用于一次性导入）**
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
@@ -150,10 +169,11 @@ hosts:
       unit: llama-server
 ```
 
-#### 1.3 增删主机
+#### 1.3 增删主机（界面）
 
-在 `hosts.yaml` 的 `hosts` 列表中增删条目，然后重启服务（原生：重跑 `./run.sh`；Docker：`docker compose restart`）。无需改代码。
-每台主机独立监控：一台故障不影响其他主机与面板自身。
+- 门户页顶部【主机管理】→ 添加 / 编辑 / 删除主机：名称、llama-server 地址、SSH 凭证（密码/密钥，Fernet 加密入库）
+- 改动即时生效，无需重启（监控任务动态增删）
+- 每台主机独立监控：一台故障不影响其他主机与面板自身
 
 #### 1.4 阈值配置（飘红）
 
@@ -182,6 +202,18 @@ hosts:
     thresholds:
       mtp: { warn: 75, danger: 60 }
 ```
+
+#### 1.5 数据目录 `data/`（持久化）
+
+| 文件 | 说明 |
+|---|---|
+| `llama_ctl.db` | 主机数据 + SSH 凭证（Fernet 加密）+ 管理员账号 |
+| `history.db` | 监控历史：原始（1s/2s）7 天 + 1 分钟聚合 90 天 + 事件 30 天，WAL 模式 |
+| `fernet.key` / `jwt.secret` | 凭证加密密钥 / JWT 签名密钥（首次启动自动生成） |
+
+- 全部运行时数据在 `data/`；备份 = 备份该目录；升级/重建不丢数据
+- 容量估算（单主机，1s/2s 采集）：原始 ~22MB/天，7 天 ~159MB；1 分钟聚合 90 天 ~50MB。详见 [docs/05](docs/05-监控数据持久化方案.md)
+- `data/` 已被 `.gitignore` 排除，勿提交
 
 ### 2. 准备被监控主机（llama-server systemd 配置）
 
@@ -278,32 +310,24 @@ curl http://<面板主机>:8000/api/health
 # 1. 安装后端依赖
 pip3 install -r backend/requirements.txt
 
-# 2. 配置
-cp config/hosts.example.yaml config/hosts.yaml   # 填写主机信息
-cp .env.example .env                              # 填写 SSH 密码
-
-# 3. 构建前端（frontend/dist 已存在可跳过）
+# 2. 构建前端（frontend/dist 已存在可跳过）
 cd frontend && npm install && npm run build && cd ..
 
-# 4. 启动
+# 3. 启动（主机在界面添加；老用户可放 config/hosts.yaml 自动导入）
 ./run.sh                                          # http://<本机>:8000
 ```
 
 - `run.sh` 在 `frontend/dist` 缺失时会自动构建前端
 - 换端口：`PORT=9000 ./run.sh`
 - 日志：stdout + `logs/llamalens.log`
+- 数据：`data/`（主机库 + 监控历史 + 密钥），自动创建
 
 #### 3.2 Docker 部署
 
 镜像为多阶段构建（node 构建前端 → python slim 运行后端），
-凭证与主机拓扑不打进镜像，运行时以只读卷挂载：
+全部运行时数据在 `./data`（主机库 + 监控历史 + 密钥），以卷挂载持久化：
 
 ```bash
-# 1. 配置（同原生）
-cp config/hosts.example.yaml config/hosts.yaml
-cp .env.example .env
-
-# 2. 构建并启动
 docker compose up -d --build                      # http://<主机>:8000
 ```
 
@@ -312,8 +336,7 @@ docker compose up -d --build                      # http://<主机>:8000
 ```bash
 docker build -t llamalens:latest .
 docker run -d --name llamalens -p 8000:8000 \
-  -v $PWD/config/hosts.yaml:/app/config/hosts.yaml:ro \
-  -v $PWD/.env:/app/.env:ro \
+  -v $PWD/data:/app/data \
   -v $PWD/logs:/app/logs \
   llamalens:latest
 ```
@@ -324,15 +347,15 @@ docker run -d --name llamalens -p 8000:8000 \
 # 构建机：导出镜像
 docker save llamalens:latest | gzip -c > llamalens-web-<日期>.tgz
 
-# 拷贝到目标机（镜像 + 现有配置）
-scp llamalens-web-<日期>.tgz config/hosts.yaml .env root@<目标机>:/opt/llamalens/
+# 拷贝到目标机（镜像 + 数据目录；老用户另拷 config/hosts.yaml 做一次性导入）
+scp llamalens-web-<日期>.tgz root@<目标机>:/opt/llamalens/
+scp -r data root@<目标机>:/opt/llamalens/
 
 # 目标机：加载并启动（挂载与 compose 部署一致）
 docker load -i /opt/llamalens/llamalens-web-<日期>.tgz
 docker run -d --name llamalens --restart unless-stopped \
   -p 8000:8000 -e PORT=8000 \
-  -v /opt/llamalens/config/hosts.yaml:/app/config/hosts.yaml:ro \
-  -v /opt/llamalens/.env:/app/.env:ro \
+  -v /opt/llamalens/data:/app/data \
   -v /opt/llamalens/logs:/app/logs \
   llamalens:latest
 
@@ -341,8 +364,8 @@ docker ps                            # 约 30s 后 (healthy)
 curl -s localhost:8000/api/health
 ```
 
-- 三个挂载：`hosts.yaml`/`.env` 只读、`logs` 持久化（与 compose 一致）
-- 改配置后 `docker restart llamalens` 即生效（配置是挂载的，无需重建镜像）
+- 两个挂载：`data`（主机库 + 监控历史 + 密钥）、`logs` 持久化（与 compose 一致）
+- 老用户一次性导入：只读挂载 `config/hosts.yaml`（见 docker-compose.yml 可选挂载）
 
 常用操作：
 
@@ -371,7 +394,7 @@ docker ps                            # 查看 (healthy) 状态
 
 #### 4.2 详情页（/host/:id）
 
-自上而下 8 个分区：
+自上而下 9 个分区：
 
 | 分区 | 内容 |
 |---|---|
@@ -382,7 +405,8 @@ docker ps                            # 查看 (healthy) 状态
 | 系统区 | CPU（型号/核数/每核条/load 1-5-15/主频）、内存（total/used/buff_cache/swap）、磁盘（每挂载点使用率 + 读写速率）、网络（每网卡 rx/tx） |
 | 进程区 | llama-server 进程卡（PID / CPU% / RSS / 线程 / 运行时长 / systemd 服务状态 / 完整命令行 + 解析参数表）+ Top 8 CPU + Top 8 内存 |
 | 模型与 Slot | 模型卡（名称/路径/ftype/参数量/n_ctx/capabilities 等）+ 每 Slot 一张卡（状态/任务/prompt tokens/已解码/剩余/全量采样参数） |
-| 趋势区 | 12 图 3 组（llama：生成速度/预填充速度/上下文占用/MTP 接受率；GPU：利用率/显存/温度/功耗；系统：CPU/内存/网络/负载），5m/15m/1h 窗口切换 |
+| 趋势区 | 12 图 3 组（llama：生成速度/预填充速度/上下文占用/MTP 接受率；GPU：利用率/显存/温度/功耗；系统：CPU/内存/网络/负载），5m/15m/1h/4h/24h/7d/90d 窗口切换（长窗口走持久化数据） |
+| 服务管理区（v2.0） | 主机 systemd unit 扫描、新建/复制/编辑 unit 文件（Monaco 编辑器）、启停/重启、查看日志、参数解析与生成 |
 
 #### 4.3 实时刷新控制
 
@@ -414,6 +438,15 @@ Dracula / Synthwave '84 / Tokyo Night / Matrix。选择保存在浏览器（loca
 | 两者都断 | 全页红色横幅"主机不可达" |
 | 无 GPU / 无进程 / 无 Slot | 对应区域显示空态提示 |
 
+#### 4.7 主机管理与服务管理（v2.0）
+
+- 门户页顶部【主机管理】按钮 → 主机列表（实时状态 / 模型 / 在线）
+- 添加/编辑：名称、llama-server 地址（host:port）、SSH（host/port/user/密码或密钥）、采集参数（进程名、unit、日志源等）
+- 凭证 Fernet 加密入库；列表接口不回显明文密码
+- 增删改即时生效（监控任务动态增删），无需重启
+- 详情页【服务管理】区：主机 systemd unit 扫描、新建/复制/编辑 unit 文件（Monaco 编辑器）、
+  启停/重启、查看日志、参数解析与生成
+
 ### 5. 运维
 
 #### 5.1 日志
@@ -441,15 +474,22 @@ curl http://<主机>:8000/api/health
 
 ### 6. API 参考
 
+除 `/api/health` 与 `/api/auth/*` 外，所有接口需登录 token：`Authorization: Bearer <token>`（WS 用 `?token=` 查询参数）。
+
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | /api/health | 面板自检：{status, hosts: {id: {llama_online, ssh_ok}}} |
-| GET | /api/hosts | 门户页：[{id, name, online, model_name, gen_speed_tps, gpus, cpu_pct, mem_pct, ...}] |
+| GET | /api/health | 面板自检（公开）：{status, hosts: {id: {llama_online, ssh_ok}}} |
+| POST | /api/auth/login | 登录：{username, password} → {token, expires_in} |
+| GET | /api/auth/config | 鉴权是否开启 |
+| GET | /api/hosts | 门户页（统一主机列表：监控 + 管理字段，id=mid，db_id=整型主键） |
+| POST/PUT/DELETE | /api/hosts… | 主机管理：添加 / 编辑 / 删除 / 连接测试 / 文件系统浏览 |
 | GET | /api/hosts/{id}/overview | 完整快照（80+ 字段） |
-| GET | /api/hosts/{id}/history?window=300 | 历史序列（window 秒：300/900/3600） |
-| GET | /api/hosts/{id}/events?limit=50 | 事件流 |
-| WS | /ws/hosts/{id} | 每 push_interval（默认 1s）推送快照；客户端发 {"type":"ping"} 心跳 |
-| WS | /ws/portal | 每 1s 推送 /api/hosts 数据 |
+| GET | /api/hosts/{id}/history?window=300 | 历史序列（window 秒：≤3600 内存、≤7d 原始、更长走 1 分钟聚合；响应含 tier） |
+| GET | /api/hosts/{id}/events?limit=50 | 事件流（内存 + 数据库合并） |
+| GET/POST | /api/services… | 服务管理：unit 列表 / 新建 / 启停重启 / 状态 / 日志 / 配置读写 |
+| GET/PUT | /api/scan-rules | 扫描规则 |
+| WS | /ws/hosts/{id}?token= | 每 push_interval（默认 1s）推送快照；客户端发 {"type":"ping"} 心跳 |
+| WS | /ws/portal?token= | 每 1s 推送 /api/hosts 数据 |
 
 交互式 API 文档：`http://<主机>:8000/docs`（FastAPI Swagger）。
 
@@ -517,5 +557,6 @@ llamalens --no-color
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v2.0.0 | 2026-09-06 | 合并 LlamaCtl-Web 管理能力：主机管理（界面增删改、Fernet 加密凭证存储、hosts.yaml 一次性导入）+ 服务管理（systemd unit 扫描/新建/编辑/启停/日志）；主机数据统一 SQLite（单一数据源）；监控数据持久化（SQLite 两级：原始 7 天 + 1 分钟聚合 90 天 + 事件 30 天，重启不丢）；统一 JWT 鉴权（admin 账号，/api/health 公开）；趋势长窗口 4h/24h/7d/90d |
 | v1.0.0 | 2026-08-29 | 首个发布版本：多主机实时监控（门户 + 单主机详情）、WS 1s 实时推送、阈值飘红、Top CPU 精度修复（/proc stat 直读）、SSH 断连自愈 |
 | v1.1.0 | 2026-09-01 | 本地 CLI（llamalens TUI，零依赖单二进制，与 Web 同源采集/阈值/事件）；Docker 离线 tgz 交付流程；后端稳定性（异步日志防事件循环阻塞、CUDA 一次性采集、WS 关闭限时、进程名 15 字符 cmdline 回退）；前端标签页隐藏暂停轮询；TUI 修复（GPU 占用 0MB、ANSI256 红色不可见、任务卡状态以 /slots 为准、GPU 进程按卡归属、--dump-frame/--no-color 诊断） |

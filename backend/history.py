@@ -338,19 +338,16 @@ class HistoryWriter:
                 self._store.write_event(host_id, ts, level, type_, msg)
             except sqlite3.Error:
                 log.exception("事件落库失败: %s", host_id)
-        self._aggregate_due()
+        # 用刚刷盘批次的主机集合驱动聚合（swap 后的新缓冲通常为空，不能作依据）
+        flushed_hosts = {h for h, _ in llama.keys()} | {h for h, _ in host.keys()}
+        self._aggregate_due(flushed_hosts)
         self._cleanup_due()
 
-    def _aggregate_due(self) -> None:
+    def _aggregate_due(self, hosts) -> None:
         """对已完整结束且未聚合的分钟做 1m 聚合。"""
         now = int(time.time())
         prev_minute = (now // 60) * 60 - 60
-        hosts = set()
         with self._lock:
-            for h, _ in self._llama.keys():
-                hosts.add(h)
-            for h, _ in self._host.keys():
-                hosts.add(h)
             last = dict(self._last_agg)
         for h in hosts:
             done = last.get(h, 0)

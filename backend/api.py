@@ -89,7 +89,8 @@ def _monitor(request: Request, host_id: str):
 
 
 @router.get("/health")
-async def panel_health(request: Request, user: str = Depends(get_current_user)):
+async def panel_health(request: Request):
+    # 公开端点：Docker 健康检查与面板存活探测用，不含敏感信息
     reg = _registry(request)
     hosts = {}
     for mid, m in reg.monitors.items():
