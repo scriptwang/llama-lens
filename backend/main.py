@@ -18,6 +18,8 @@ from fastapi.responses import FileResponse
 
 from .api import router as api_router
 from .config import load_config
+from .ctl.errors import ApiError, api_error_handler
+from .ctl.main import ctl_routers, init_ctl, shutdown_ctl
 from .monitor import MonitorRegistry
 from .ws import router as ws_router
 
@@ -97,17 +99,22 @@ def create_app(base_dir: Optional[str] = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         log.info("llama灵境 启动：端口 %d，主机 %s", app_cfg.port,
                  [h.id for h in app_cfg.hosts] or "(无)")
+        init_ctl()
         await registry.start()
         try:
             yield
         finally:
             await registry.stop()
+            shutdown_ctl()
             log.info("llama灵境 已停止")
 
     app = FastAPI(title="llama灵境", lifespan=lifespan)
     app.state.registry = registry
     app.include_router(api_router)
     app.include_router(ws_router)
+    for r in ctl_routers:
+        app.include_router(r)
+    app.add_exception_handler(ApiError, api_error_handler)
 
     dist = os.path.join(base_dir, "frontend", "dist")
 
