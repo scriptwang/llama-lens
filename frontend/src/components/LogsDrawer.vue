@@ -1,5 +1,5 @@
 <template>
-  <el-drawer :model-value="modelValue" @update:model-value="$emit('update:modelValue', $event)" title="操作日志" size="680px">
+  <el-drawer :model-value="modelValue" @update:model-value="$emit('update:modelValue', $event)" title="操作日志" size="680px" :teleported="false">
     <el-table :data="logs" size="small" v-loading="loading">
       <el-table-column prop="created_at" label="时间" width="165" />
       <el-table-column prop="user" label="用户" width="80" />

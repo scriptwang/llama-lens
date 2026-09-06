@@ -1,5 +1,13 @@
 async function getJson(url) {
-  const resp = await fetch(url, { headers: { Accept: 'application/json' } })
+  const headers = { Accept: 'application/json' }
+  const token = localStorage.getItem('llama_token')
+  if (token) headers.Authorization = `Bearer ${token}`
+  const resp = await fetch(url, { headers })
+  if (resp.status === 401) {
+    localStorage.removeItem('llama_token')
+    window.location.href = '/login'
+    throw new Error(`${url} → 401`)
+  }
   if (!resp.ok) throw new Error(`${url} → ${resp.status}`)
   return resp.json()
 }

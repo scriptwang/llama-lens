@@ -10,7 +10,7 @@ export const useAuthStore = defineStore('auth', {
     currentHostId: Number(localStorage.getItem('llama_host_id') || 0),
   }),
   getters: {
-    currentHost: (s) => s.hosts.find((h) => h.id === s.currentHostId) || null,
+    currentHost: (s) => s.hosts.find((h) => h.db_id === s.currentHostId) || null,
   },
   actions: {
     async login(username, password) {

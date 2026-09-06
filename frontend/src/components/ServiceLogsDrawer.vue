@@ -4,7 +4,7 @@
     @update:model-value="$emit('update:modelValue', $event)"
     :title="`服务日志 · ${service ? service.name : ''}`"
     size="720px"
-  >
+   :teleported="false">
     <div class="log-toolbar">
       <el-select v-model="lineCount" size="small" style="width: 130px" @change="load">
         <el-option :value="100" label="最近 100 行" />

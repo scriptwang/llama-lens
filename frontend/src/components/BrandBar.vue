@@ -12,18 +12,25 @@
       <span v-if="totalSpeed > 0" class="sep">·</span>
       <span v-if="totalSpeed > 0">Token 速度 <b class="lv-cyan">{{ totalSpeed.toFixed(1) }} tok/s</b></span>
       <span class="conn" :class="connected ? 'ok' : 'bad'">{{ connected ? 'WS 实时' : '轮询中' }}</span>
+      <button class="ctl-entry" @click="hostMgr = true">⚙ 主机管理</button>
       <ThemeSwitcher />
       <span class="clock-sep"></span>
       <LiveClock />
     </div>
   </header>
+  <div class="ctl-scope">
+    <HostManager v-model="hostMgr" />
+  </div>
 </template>
 
 <script setup>
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import LiveClock from './LiveClock.vue'
 import ThemeSwitcher from './ThemeSwitcher.vue'
+import HostManager from './HostManager.vue'
 import { totalSpeed as globalSpeed } from '../speed'
+
+const hostMgr = ref(false)
 
 const props = defineProps({
   hosts: { type: Array, default: () => [] },
@@ -40,6 +47,17 @@ watch(totalSpeed, (v) => { globalSpeed.value = v }, { immediate: true })
 </script>
 
 <style scoped>
+.ctl-entry {
+  background: rgba(16, 24, 40, 0.55);
+  color: var(--text-dim);
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.ctl-entry:hover { color: var(--cyan); border-color: var(--card-border-hover); }
 .brandbar {
   height: 56px;
   display: flex;

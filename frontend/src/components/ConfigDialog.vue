@@ -5,7 +5,7 @@
     :title="`编辑配置 - ${service ? service.name : ''}`"
     fullscreen
     destroy-on-close
-  >
+   :teleported="false">
     <div v-loading="loading">
       <el-alert
         v-if="parseError"

@@ -1,5 +1,5 @@
 <template>
-  <el-drawer :model-value="modelValue" @update:model-value="$emit('update:modelValue', $event)" title="主机管理" size="640px">
+  <el-drawer :model-value="modelValue" @update:model-value="$emit('update:modelValue', $event)" title="主机管理" size="640px" :teleported="false">
     <div class="toolbar">
       <el-button type="primary" size="small" @click="openCreate">
         <el-icon><Plus /></el-icon>新建主机
@@ -29,7 +29,7 @@
     <el-empty v-if="!hosts.length" description="暂无主机，点击右上角「新建主机」添加" />
     <div class="tip">提示：凭证以 Fernet 加密存储于本地 SQLite，接口永不回传明文。浏览路径用于可视化面板文件选择器的快捷目录（逗号分隔，如 /share,/models）。</div>
 
-    <el-dialog v-model="showEdit" title="编辑主机" width="480px" append-to-body>
+    <el-dialog v-model="showEdit" title="编辑主机" width="480px" append-to-body :teleported="false">
       <el-form label-position="top">
         <el-form-item label="别名">
           <el-input v-model="editForm.alias" placeholder="可选" />
@@ -44,7 +44,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showCreate" title="新建主机" width="480px" append-to-body>
+    <el-dialog v-model="showCreate" title="新建主机" width="480px" append-to-body :teleported="false">
       <el-form label-position="top">
         <div class="form-grid">
           <el-form-item label="别名">
@@ -150,14 +150,14 @@ async function saveEdit() {
 }
 
 function use(row) {
-  store.setCurrentHost(row.id)
+  store.setCurrentHost(row.db_id)
   emit('update:modelValue', false)
   emit('changed')
 }
 
 async function remove(row) {
   await ElMessageBox.confirm(`确定删除主机 ${row.alias || row.host} 吗？`, '删除确认', { type: 'warning' })
-  await http.delete(`/hosts/${row.id}`)
+  await http.delete(`/hosts/${row.db_id}`)
   ElMessage.success('已删除')
   hosts.value = await store.fetchHosts()
 }

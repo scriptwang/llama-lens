@@ -5,7 +5,7 @@
     title="复制服务"
     width="720px"
     destroy-on-close
-  >
+   :teleported="false">
     <el-alert
       type="info"
       :closable="false"

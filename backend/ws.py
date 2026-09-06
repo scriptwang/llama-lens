@@ -12,11 +12,28 @@ from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from .ctl.config import settings as ctl_settings
+from .ctl.security import decode_token
+
 log = logging.getLogger("llamalens.ws")
 
 router = APIRouter()
 
 PING_TIMEOUT = 30.0
+
+
+def _ws_auth(ws: WebSocket) -> bool:
+    """WS 鉴权：auth 关闭放行；否则校验 query 参数 token。"""
+    if not ctl_settings.auth_enabled:
+        return True
+    token = ws.query_params.get("token", "")
+    if not token:
+        return False
+    try:
+        decode_token(token)
+        return True
+    except Exception:
+        return False
 
 
 class _Fanout:
@@ -90,6 +107,9 @@ async def _recv_loop(ws: WebSocket) -> None:
 
 @router.websocket("/ws/hosts/{host_id}")
 async def ws_host(ws: WebSocket, host_id: str):
+    if not _ws_auth(ws):
+        await ws.close(code=4401)
+        return
     registry = ws.app.state.registry
     monitor = registry.get(host_id)
     await ws.accept()
@@ -113,6 +133,9 @@ async def ws_host(ws: WebSocket, host_id: str):
 
 @router.websocket("/ws/portal")
 async def ws_portal(ws: WebSocket):
+    if not _ws_auth(ws):
+        await ws.close(code=4401)
+        return
     registry = ws.app.state.registry
     await ws.accept()
     hub = getattr(registry, "_portal_hub", None)

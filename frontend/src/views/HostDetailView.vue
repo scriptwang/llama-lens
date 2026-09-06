@@ -154,6 +154,42 @@
           </div>
         </section>
       </template>
+
+      <!-- ============ 服务管理（LlamaCtl 能力） ============ -->
+      <section class="ctl-scope">
+        <div class="section-title">服务管理</div>
+        <div class="ctl-toolbar">
+          <el-button type="primary" size="small" @click="newServiceVisible = true">
+            <el-icon style="margin-right:4px"><Plus /></el-icon>新建服务
+          </el-button>
+          <el-button size="small" :loading="ctlScanning" @click="ctlScan">
+            <el-icon style="margin-right:4px"><Refresh /></el-icon>扫描服务
+          </el-button>
+          <el-button size="small" @click="ctlRuleDialog = true">扫描规则</el-button>
+          <el-button size="small" @click="ctlLogsDrawer = true">操作日志</el-button>
+        </div>
+        <MetricsPanel :data="ctlMetrics" :error="ctlMetricsError" :services="ctlServices" :host-label="hostName" />
+        <el-empty v-if="!ctlServices.length" description="未扫描到匹配的服务，可检查【扫描规则】或【新建服务】" :image-size="60" />
+        <el-row :gutter="16" v-else>
+          <el-col :xs="24" :sm="12" :lg="8" :xl="6" v-for="s in ctlServices" :key="s.name">
+            <ServiceCard
+              :service="s"
+              :metrics="ctlMetrics ? ctlMetrics.services : null"
+              @action="onCtlAction"
+              @edit="openCtlConfig"
+              @restore="onCtlRestore"
+              @logs="openCtlLogs"
+              @duplicate="openCtlDup"
+            />
+          </el-col>
+        </el-row>
+        <ConfigDialog v-model="ctlConfigVisible" :service="ctlActiveService" @saved="ctlScan" />
+        <NewServiceDialog v-model="newServiceVisible" @created="ctlScan" />
+        <DuplicateServiceDialog v-model="ctlDupVisible" :service="ctlDupService" @created="ctlScan" />
+        <ServiceLogsDrawer v-model="ctlSvcLogsVisible" :service="ctlActiveService" :host-id="ctlDbId" />
+        <RuleEditor v-model="ctlRuleDialog" />
+        <LogsDrawer v-model="ctlLogsDrawer" />
+      </section>
     </main>
 
     <div v-if="mode === 'paused'" class="paused-watermark"><span>已暂停</span></div>
@@ -182,6 +218,16 @@ import ModelInfoCard from '../components/ModelInfoCard.vue'
 import SlotTable from '../components/SlotTable.vue'
 import TrendChart from '../components/TrendChart.vue'
 import EventFeed from '../components/EventFeed.vue'
+import http from '../api/client'
+import { useAuthStore } from '../stores/auth'
+import MetricsPanel from '../components/MetricsPanel.vue'
+import ServiceCard from '../components/ServiceCard.vue'
+import ConfigDialog from '../components/ConfigDialog.vue'
+import NewServiceDialog from '../components/NewServiceDialog.vue'
+import DuplicateServiceDialog from '../components/DuplicateServiceDialog.vue'
+import ServiceLogsDrawer from '../components/ServiceLogsDrawer.vue'
+import RuleEditor from '../components/RuleEditor.vue'
+import LogsDrawer from '../components/LogsDrawer.vue'
 
 const props = defineProps({ id: { type: String, required: true } })
 
@@ -387,7 +433,11 @@ const sparkMtp = computed(() => mapTail('mtp_acceptance', (v) => v * 100))
 const windows = [
   { s: 300, label: '5m' },
   { s: 900, label: '15m' },
-  { s: 3600, label: '1h' }
+  { s: 3600, label: '1h' },
+  { s: 14400, label: '4h' },
+  { s: 86400, label: '24h' },
+  { s: 604800, label: '7d' },
+  { s: 7776000, label: '90d' }
 ]
 const winS = ref(300)
 const history = ref(null)
@@ -511,14 +561,97 @@ const chartMtp = computed(() => {
 const sparkGen = computed(() => mapTail('gen_speed', (v) => v))
 const sparkPrompt = computed(() => mapTail('prompt_speed', (v) => v))
 
-onMounted(() => {
+// ---------------- 服务管理（LlamaCtl） ----------------
+const authStore = useAuthStore()
+const ctlDbId = ref(0)
+const ctlServices = ref([])
+const ctlMetrics = ref(null)
+const ctlMetricsError = ref('')
+const ctlScanning = ref(false)
+const ctlConfigVisible = ref(false)
+const newServiceVisible = ref(false)
+const ctlDupVisible = ref(false)
+const ctlDupService = ref(null)
+const ctlSvcLogsVisible = ref(false)
+const ctlActiveService = ref(null)
+const ctlRuleDialog = ref(false)
+const ctlLogsDrawer = ref(false)
+let ctlMetricsTimer = null
+
+async function ctlScan() {
+  if (!ctlDbId.value) return
+  ctlScanning.value = true
+  try {
+    ctlServices.value = await http.get('/services', { params: { host_id: ctlDbId.value } })
+  } catch (e) {
+    ctlServices.value = []
+  } finally {
+    ctlScanning.value = false
+  }
+}
+
+async function ctlPollMetrics() {
+  if (!ctlDbId.value) return
+  try {
+    ctlMetrics.value = await http.get('/metrics', { params: { host_id: ctlDbId.value } })
+    ctlMetricsError.value = ''
+  } catch (e) {
+    ctlMetricsError.value = String((e && e.message) || e)
+  }
+}
+
+async function onCtlAction(service, action) {
+  try {
+    await http.post(`/services/${encodeURIComponent(service.name)}/${action}`, null,
+      { params: { host_id: ctlDbId.value } })
+    ctlPollMetrics()
+  } catch (e) { /* client 已提示 */ }
+}
+
+function openCtlConfig(service) {
+  ctlActiveService.value = service
+  ctlConfigVisible.value = true
+}
+
+async function onCtlRestore(service) {
+  try {
+    await http.post(`/services/${encodeURIComponent(service.name)}/restore`, null,
+      { params: { host_id: ctlDbId.value } })
+    ctlScan()
+  } catch (e) { /* client 已提示 */ }
+}
+
+function openCtlLogs(service) {
+  ctlActiveService.value = service
+  ctlSvcLogsVisible.value = true
+}
+
+function openCtlDup(service) {
+  ctlDupService.value = service
+  ctlDupVisible.value = true
+}
+
+onMounted(async () => {
   loadHistory()
   histTimer = setInterval(loadHistory, 5000)
   document.addEventListener('visibilitychange', onVisibilityChange)
+  // 解析管理侧 db_id（统一列表 id=mid，db_id=整型主键）
+  try {
+    const hosts = await api.hosts()
+    const h = hosts.find((x) => x.id === props.id)
+    if (h && h.db_id) {
+      ctlDbId.value = h.db_id
+      authStore.setCurrentHost(h.db_id)
+      ctlScan()
+      ctlPollMetrics()
+      ctlMetricsTimer = setInterval(ctlPollMetrics, 5000)
+    }
+  } catch (e) { /* 无管理数据 */ }
 })
 watch(winS, loadHistory)
 onBeforeUnmount(() => {
   if (histTimer) clearInterval(histTimer)
+  if (ctlMetricsTimer) clearInterval(ctlMetricsTimer)
   document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 </script>

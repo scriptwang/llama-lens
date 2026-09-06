@@ -1,5 +1,5 @@
 <template>
-  <el-dialog :model-value="modelValue" @update:model-value="$emit('update:modelValue', $event)" title="扫描规则" width="600px">
+  <el-dialog :model-value="modelValue" @update:model-value="$emit('update:modelValue', $event)" title="扫描规则" width="600px" :teleported="false">
     <el-alert
       type="info"
       :closable="false"

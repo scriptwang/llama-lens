@@ -3,8 +3,9 @@ import json
 import time
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from .ctl.routers.auth import get_current_user
 from .monitor import MonitorRegistry
 from .store import downsample
 
@@ -88,7 +89,7 @@ def _monitor(request: Request, host_id: str):
 
 
 @router.get("/health")
-async def panel_health(request: Request):
+async def panel_health(request: Request, user: str = Depends(get_current_user)):
     reg = _registry(request)
     hosts = {}
     for mid, m in reg.monitors.items():
@@ -101,13 +102,15 @@ async def panel_health(request: Request):
 
 
 @router.get("/hosts/{host_id}/overview")
-async def host_overview(request: Request, host_id: str):
+async def host_overview(request: Request, host_id: str,
+                        user: str = Depends(get_current_user)):
     return _monitor(request, host_id).snapshot()
 
 
 @router.get("/hosts/{host_id}/history")
 async def host_history(request: Request, host_id: str,
-                       window: int = Query(default=300)):
+                       window: int = Query(default=300),
+                       user: str = Depends(get_current_user)):
     if window not in VALID_WINDOWS:
         window = 300
     if window <= MEMORY_MAX_WINDOW:
@@ -121,7 +124,8 @@ async def host_history(request: Request, host_id: str,
 
 @router.get("/hosts/{host_id}/events")
 async def host_events(request: Request, host_id: str,
-                      limit: int = Query(default=50, ge=1, le=200)):
+                      limit: int = Query(default=50, ge=1, le=200),
+                      user: str = Depends(get_current_user)):
     mon = _monitor(request, host_id)
     mem = mon.events_list(limit)
     store = request.app.state.history

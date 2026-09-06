@@ -142,11 +142,10 @@ def connect(req: HostConnectReq, request: Request, user: str = Depends(get_curre
 
 
 @router.get("")
-def list_hosts(request: Request):
+def list_hosts(request: Request, user: str = Depends(get_current_user)):
     """统一主机列表：管理字段 + mid + 监控实时状态。
 
     返回纯数组（监控前端兼容）：id=mid（监控/路由用），db_id=整型主键（管理 API 用）。
-    注：P1 阶段保持公开（与合并前监控列表一致）；P2 统一鉴权后加登录依赖。
     """
     rows = db.query("SELECT * FROM hosts ORDER BY id")
     reg = getattr(request.app.state, "registry", None)

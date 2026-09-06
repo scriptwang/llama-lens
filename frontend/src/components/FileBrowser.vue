@@ -6,7 +6,7 @@
     width="760px"
     append-to-body
     destroy-on-close
-  >
+   :teleported="false">
     <div v-if="roots.length" class="fb-roots">
       <span class="fb-roots-label">快捷目录：</span>
       <el-tag v-for="r in roots" :key="r" class="fb-root" effect="plain" @click="navigate(r)">{{ r }}</el-tag>
