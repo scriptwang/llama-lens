@@ -169,6 +169,8 @@ function onModeChange(e) {
 .diag-btn {
   display: inline-flex;
   align-items: center;
+  flex: none;
+  white-space: nowrap;
   background: transparent;
   border: 1px solid var(--card-border);
   color: var(--text-dim);
@@ -200,7 +202,7 @@ function onModeChange(e) {
 .back { color: var(--text-dim); font-size: 13px; flex: none; }
 .back:hover { color: var(--cyan); text-decoration: none; }
 .host-info { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.hostname { font-size: 15px; font-weight: 600; }
+.hostname { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .model { color: var(--text-dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stats { display: flex; align-items: center; gap: 6px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .stats::-webkit-scrollbar { display: none; }
@@ -220,7 +222,7 @@ function onModeChange(e) {
 .stat.warn .v { color: var(--amber); }
 .stat.danger .v { color: var(--red); }
 .stat.off .v { color: var(--text-faint); }
-.right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.right { margin-left: auto; display: flex; align-items: center; gap: 12px; flex: none; }
 .mode-indicator { width: 8px; height: 8px; border-radius: 50%; }
 .mode-indicator.green { background: var(--green); box-shadow: 0 0 6px var(--green); }
 .mode-indicator.amber { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
