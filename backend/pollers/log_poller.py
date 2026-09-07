@@ -164,13 +164,21 @@ class LogPoller:
                 self._backoff = 1.0
                 if not self.state["boot"]:
                     await self._fetch_boot_block()
-                if cfg.follow:
+                stream_t0 = time.time()
+                if cfg.follow and not self._is_windows_file():
                     await self._follow()
                 else:
+                    # Windows 文件路径强制走偏移轮询（_poll_mode 内部自循环）
                     await self._poll_mode()
                 self.available = False
                 self.state["available"] = False
-                await asyncio.sleep(1.0)
+                # 流存活过短（秒断，如日志文件缺失/远端命令失败）→ 指数退避重开，
+                # 防止每秒重开 SSH 命令形成远端 cmd/powershell 进程风暴
+                if time.time() - stream_t0 < 5.0:
+                    self._backoff = min(self._backoff * 2, 30.0)
+                    await asyncio.sleep(self._backoff)
+                else:
+                    await asyncio.sleep(1.0)
             except Exception:
                 # 单轮异常不能杀死整个 poller 任务（同 SshPoller）
                 log.exception("[%s] 日志采集异常", self.cfg.id)
@@ -191,7 +199,18 @@ class LogPoller:
         """
         cfg = self.cfg.log
         if cfg.source == "file":
-            cmd = BOOT_BLOCK_CMD_FILE.format(path=cfg.path or "")
+            path = cfg.path or ""
+            if len(path) >= 2 and path[1] == ':':
+                # Windows 路径：远端无 tail/grep，改用 PowerShell 取
+                # 'listening on' 前 200 行 + 该行（等效 grep -B 200 | tail -201）
+                cmd = (
+                    "powershell -NoProfile -NonInteractive -Command "
+                    "\"$c = Get-Content -LiteralPath '%s' -Tail 50000 -ErrorAction SilentlyContinue; "
+                    "$m = $c | Select-String -SimpleMatch 'listening on' | Select-Object -Last 1; "
+                    "if ($m) { $s = [Math]::Max(0, $m.LineNumber - 201); $c[$s..($m.LineNumber-1)] }\"" % path
+                )
+            else:
+                cmd = BOOT_BLOCK_CMD_FILE.format(path=path)
         elif cfg.source == "windows_eventlog":
             cmd = BOOT_BLOCK_CMD_WIN
         else:
@@ -203,25 +222,29 @@ class LogPoller:
             m = RE_PREFIX.match(line)
             self._parse_boot_line(m.group(5) if m else line)
 
+    def _is_windows_file(self) -> bool:
+        """Windows 日志文件模式判定。
+
+        Get-Content -Wait 流式跟随会在远端留常驻 powershell（被 cmd /c 包裹，
+        cmd 会一直等待其退出）。SSH 断开时 Windows sshd 可能杀不掉旧进程，
+        反复重连导致 cmd/powershell 进程堆积直至内存耗尽。
+        因此 Windows 文件路径一律改用字节偏移轮询（远端命令秒级退出）。
+        """
+        if self.cfg.log.source != "file":
+            return False
+        path = self.cfg.log.path or ""
+        return len(path) >= 2 and path[1] == ':'
+
     def _follow_cmd(self) -> str:
-        """按日志源（journal | file | windows_eventlog）构造流式跟随命令。"""
+        """按日志源（journal | file）构造流式跟随命令（仅 Linux 路径会走到这里）。"""
         cfg = self.cfg.log
         if cfg.source == "file":
             path = cfg.path or ""
-            # 检测是否是 Windows 路径（包含盘符如 C:\ 或 E:\）
-            is_windows_path = len(path) >= 2 and path[1] == ':'
-            if is_windows_path:
-                # Windows: 使用 PowerShell 的 Get-Content -Wait
-                if self._last_line_ts is not None:
-                    # 重连后读取最后 200 行
-                    return 'powershell -NoProfile -Command "Get-Content \\"%s\\" -Tail 200 -Wait"' % path.replace('\\', '\\\\')
-                return 'powershell -NoProfile -Command "Get-Content \\"%s\\" -Wait"' % path.replace('\\', '\\\\')
-            else:
-                # Linux: 使用 tail -F
-                if self._last_line_ts is not None:
-                    # 重连后补拉最近 200 行防丢行
-                    return "tail -n 200 -F %s" % path
-                return "tail -n 0 -F %s" % path
+            # Linux: 使用 tail -F（Windows 文件路径走 _poll_mode 轮询，不经此处）
+            if self._last_line_ts is not None:
+                # 重连后补拉最近 200 行防丢行
+                return "tail -n 200 -F %s" % path
+            return "tail -n 0 -F %s" % path
         elif cfg.source == "windows_eventlog":
             # Windows 事件日志：使用 Get-WinEvent 实时监控
             if self._last_line_ts is not None:
@@ -286,8 +309,14 @@ class LogPoller:
                     break
                 self._handle_line(line)
         finally:
+            # 同时关闭文件包装与底层 channel：只关 stdout 不关 channel 会导致
+            # channel 在 transport 上累积（后端内存增长 + 读线程无法退出）
             try:
                 stdout.close()
+            except Exception:
+                pass
+            try:
+                stdout.channel.close()
             except Exception:
                 pass
 
@@ -320,8 +349,8 @@ class LogPoller:
         is_windows_path = len(path) >= 2 and path[1] == ':'
         
         if is_windows_path:
-            # Windows: 使用 PowerShell 读取文件
-            size_cmd = 'powershell -NoProfile -Command "(Get-Item \\"%s\\" -ErrorAction SilentlyContinue).Length" 2>/dev/null' % path.replace('\\', '\\\\')
+            # Windows: 使用 PowerShell 读取文件（路径用单引号内嵌，反斜杠为字面量）
+            size_cmd = "powershell -NoProfile -NonInteractive -Command \"(Get-Item -LiteralPath '%s' -ErrorAction SilentlyContinue).Length\"" % path
             size_out = await self.ssh.exec_command(size_cmd)
         else:
             size_out = await self.ssh.exec_command(
@@ -353,9 +382,14 @@ class LogPoller:
         
         if size > self._file_offset:
             if is_windows_path:
-                # Windows: 使用 PowerShell 读取文件新增内容
-                read_cmd = 'powershell -NoProfile -Command "$bytes = [System.IO.File]::ReadAllBytes(\\"%s\\"); if ($bytes.Length -gt %d) { [System.Text.Encoding]::UTF8.GetString($bytes[%d..$($bytes.Length-1)]) }" 2>/dev/null' % (
-                    path.replace('\\', '\\\\'), self._file_offset, self._file_offset)
+                # Windows: 从字节偏移处流式读取新增内容（避免整文件载入远端内存）
+                read_cmd = (
+                    "powershell -NoProfile -NonInteractive -Command "
+                    "\"$fs = [System.IO.File]::Open('%s', 'Open', 'Read', 'ReadWrite'); $fs.Position = %d; "
+                    "$r = New-Object System.IO.StreamReader($fs, [System.Text.Encoding]::UTF8); "
+                    "$r.ReadToEnd(); $r.Close(); $fs.Close()\"" % (
+                        path, self._file_offset)
+                )
                 out = await self.ssh.exec_command(read_cmd)
             else:
                 out = await self.ssh.exec_command(
