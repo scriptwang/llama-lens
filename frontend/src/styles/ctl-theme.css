@@ -49,9 +49,8 @@
   --el-button-hover-bg-color: transparent;
   --el-button-hover-border-color: transparent;
   --el-button-hover-text-color: #fff;
-  box-shadow: 0 2px 10px color-mix(in srgb, var(--lc-primary) 35%, transparent);
 }
-.el-button--primary:hover { box-shadow: 0 4px 16px color-mix(in srgb, var(--lc-primary) 50%, transparent); transform: translateY(-1px); }
+.el-button--primary:hover { filter: brightness(1.1); }
 .el-button { transition: all 0.18s ease; }
 .el-dialog {
   --el-dialog-bg-color: var(--lc-surface-solid);

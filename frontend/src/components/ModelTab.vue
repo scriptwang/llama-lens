@@ -14,6 +14,9 @@
       </span>
       <span v-else class="mt-mem mt-mem-none">无内存数据（监控未启用且探测失败）</span>
       <span class="toolbar-spacer" />
+      <el-input v-model="keyword" size="small" class="mt-search" placeholder="搜索名称 / 路径" clearable>
+        <template #prefix><el-icon><Search /></el-icon></template>
+      </el-input>
       <el-select v-model="minMb" size="small" class="mt-size-filter" @change="loadModels">
         <el-option label="全部大小" :value="0" />
         <el-option label="≥ 50 MB" :value="50" />
@@ -26,7 +29,10 @@
     </div>
 
     <el-empty v-if="!loading && !models.length" description="浏览路径下未扫描到 .gguf 模型文件（可在【主机管理】调整浏览路径）" :image-size="60" />
-    <el-table v-else :data="models" v-loading="loading" size="small" stripe>
+    <el-empty v-else-if="!filteredModels.length" description="没有符合搜索条件的模型" :image-size="60">
+      <el-button type="primary" plain size="small" @click="keyword = ''">清空搜索</el-button>
+    </el-empty>
+    <el-table v-else :data="filteredModels" v-loading="loading" size="small" stripe>
       <el-table-column label="模型" min-width="260">
         <template #default="{ row }">
           <div class="mt-name">{{ row.name }}</div>
@@ -34,7 +40,7 @@
         </template>
       </el-table-column>
       <el-table-column label="大小" width="90" align="right">
-        <template #default="{ row }">{{ fmtGib(row.size) }}</template>
+        <template #default="{ row }">{{ fmtBytes(row.size) }}</template>
       </el-table-column>
       <el-table-column label="量化" width="110">
         <template #default="{ row }">
@@ -116,7 +122,13 @@ const props = defineProps({
 
 const ctlDbId = ref(0)
 const minMb = ref(50)  // 默认隐藏 vocab 等小文件
+const keyword = ref('')
 const models = ref([])
+const filteredModels = computed(() => {
+  const kw = keyword.value.trim().toLowerCase()
+  if (!kw) return models.value
+  return models.value.filter((m) => m.name.toLowerCase().includes(kw) || m.path.toLowerCase().includes(kw))
+})
 const services = ref([])
 const memory = ref(null)
 const loading = ref(false)
@@ -128,6 +140,10 @@ const switchForm = ref({ service: '', model: '', mmproj: '' })
 function fmtGib(mb) {
   if (mb == null) return '—'
   return (mb / 1024).toFixed(2) + ' GiB'
+}
+function fmtBytes(bytes) {
+  if (bytes == null) return '—'
+  return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GiB'
 }
 function fitType(level) {
   return { ok: 'success', tight: 'warning', no: 'danger' }[level] || 'info'
@@ -204,6 +220,7 @@ onMounted(async () => {
 <style scoped>
 .mt-title { font-weight: 600; }
 .mt-size-filter { width: 110px; }
+.mt-search { width: 200px; }
 .mt-mem { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .mt-mem-tag { font-family: var(--font-mono, monospace); }
 .mt-mem-none { color: var(--text-dim, #888); font-size: 12px; }

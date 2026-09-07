@@ -167,15 +167,16 @@ function onModeChange(e) {
 .diag-btn {
   display: inline-flex;
   align-items: center;
-  background: none;
-  border: 1px solid var(--card-border);
-  color: var(--text-dim);
+  background: var(--cyan);
+  border: 1px solid var(--cyan);
+  color: #fff;
   font-size: 12px;
-  padding: 4px 10px;
+  font-weight: 600;
+  padding: 5px 12px;
   border-radius: 6px;
   cursor: pointer;
 }
-.diag-btn:hover { color: var(--text); border-color: var(--cyan); }
+.diag-btn:hover { filter: brightness(1.1); }
 .topbar {
   height: 56px;
   display: flex;

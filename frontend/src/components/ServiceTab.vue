@@ -227,7 +227,7 @@ onBeforeUnmount(() => {
 .fb-keyword :deep(.el-input__wrapper.is-focus),
 .fb-status :deep(.el-select__wrapper.is-focused),
 .fb-enabled :deep(.el-select__wrapper.is-focused) {
-  box-shadow: 0 0 0 1px var(--lc-primary) inset, 0 0 0 3px color-mix(in srgb, var(--lc-primary) 16%, transparent);
+  box-shadow: 0 0 0 1px var(--lc-primary) inset;
 }
 .fb-keyword :deep(.el-input__prefix) { color: var(--lc-text-muted); }
 .fb-count { font-size: 12px; color: var(--lc-text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
