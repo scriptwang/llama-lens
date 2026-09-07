@@ -23,11 +23,22 @@
           <template v-if="m.images && m.images.length">
             <img v-for="(src, j) in m.images" :key="j" :src="src" class="pg-img" />
           </template>
+          <!-- 思考过程（可折叠，默认展开；流式时末尾光标） -->
+          <div v-if="m.role === 'assistant' && m.reasoning" class="pg-reasoning">
+            <div class="pg-reasoning-head" @click="toggleReasoning(i)">
+              <el-icon class="pg-reasoning-caret" :class="{ open: isReasoningOpen(i) }"><CaretRight /></el-icon>
+              <span class="pg-reasoning-title">思考过程</span>
+              <span class="pg-reasoning-toggle">{{ isReasoningOpen(i) ? '收起' : '展开' }}</span>
+            </div>
+            <div v-show="isReasoningOpen(i)" class="pg-reasoning-body">
+              {{ m.reasoning }}<span v-if="streaming && i === chat.length - 1 && !m.content" class="pg-cursor">▍</span>
+            </div>
+          </div>
           <span v-if="m.role === 'assistant' && m.content" class="pg-md" v-html="asstHtml(m, i)"></span>
           <span v-else-if="m.content">{{ m.content }}</span>
           <span v-else-if="streaming && i === chat.length - 1" class="pg-cursor">▍</span>
           <span v-else-if="m.error" class="pg-err">{{ m.error }}</span>
-          <span v-else class="pg-muted">（无内容）</span>
+          <span v-else-if="!m.reasoning" class="pg-muted">（无内容）</span>
         </div>
         <div v-if="m.metrics" class="pg-metrics">
           <span v-if="m.metrics.ttft_ms != null">TTFT {{ m.metrics.ttft_ms }} ms</span>
@@ -138,6 +149,10 @@ const chatBox = ref(null)
 const taRef = ref(null)
 const fileRef = ref(null)
 const pendingImages = ref([])
+// 思考过程折叠状态（按消息索引，默认展开；仅 UI 状态，不持久化）
+const reasoningCollapsed = ref({})
+function isReasoningOpen(i) { return !reasoningCollapsed.value[i] }
+function toggleReasoning(i) { reasoningCollapsed.value[i] = !reasoningCollapsed.value[i] }
 
 // ---------------- 采样参数（按主机持久化） ----------------
 const PKEY = `llamalens.pg.params.${props.hostId}`
@@ -353,6 +368,9 @@ function handleFrame(frame, asstMsg) {
     asstMsg.error = data.msg || '未知错误'
   } else if (event === 'metrics') {
     asstMsg.metrics = data
+  } else if (typeof data.reasoning === 'string' && data.reasoning) {
+    asstMsg.reasoning += data.reasoning
+    scrollBottom()
   } else if (data.choices && data.choices[0] && data.choices[0].delta && data.choices[0].delta.content) {
     asstMsg.content += data.choices[0].delta.content
     scrollBottom()
@@ -385,7 +403,7 @@ async function send() {
   const images = [...pendingImages.value]
   input.value = ''
   pendingImages.value = []
-  const asstMsg = { role: 'assistant', content: '', metrics: null, error: '' }
+  const asstMsg = { role: 'assistant', content: '', reasoning: '', metrics: null, error: '' }
   chat.value.push({ role: 'user', content: text, images }, asstMsg)
   // 必须通过响应式数组取 proxy 再修改，直接改原对象不触发渲染（会整段一次性显示）
   const asst = chat.value[chat.value.length - 1]
@@ -534,6 +552,39 @@ onMounted(() => {
   color: var(--text-dim);
 }
 .pg-md :deep(a) { color: var(--cyan); }
+/* 思考过程块（可折叠） */
+.pg-reasoning {
+  margin-bottom: 8px;
+  border: 1px solid var(--card-border);
+  border-left: 3px solid color-mix(in srgb, var(--amber) 60%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+  overflow: hidden;
+}
+.pg-reasoning-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-dim);
+  user-select: none;
+}
+.pg-reasoning-head:hover { color: var(--text); }
+.pg-reasoning-caret { transition: transform .15s; font-size: 12px; }
+.pg-reasoning-caret.open { transform: rotate(90deg); }
+.pg-reasoning-title { font-weight: 600; }
+.pg-reasoning-toggle { margin-left: auto; color: var(--text-faint); font-size: 11px; }
+.pg-reasoning-body {
+  padding: 4px 12px 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-top: 1px dashed var(--card-border);
+}
 .pg-msg.user .pg-content {
   background: color-mix(in srgb, var(--cyan) 12%, transparent);
   border-color: color-mix(in srgb, var(--cyan) 25%, transparent);

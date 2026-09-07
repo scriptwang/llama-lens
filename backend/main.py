@@ -142,6 +142,12 @@ def create_app(base_dir: Optional[str] = None) -> FastAPI:
         app.state.registry = registry
         app.state.history = history_store
 
+        # 启动时从历史 DB 回填环形缓冲：容器重启后内存缓冲为空，短窗口（≤1h）
+        # 否则只能看到重启后的数据。回填最近 1h，消除缺口（一次性、启动前完成）。
+        if history_store is not None:
+            for m in registry.monitors.values():
+                m.backfill_from_store(history_store)
+
         log.info("llama灵境 启动：端口 %d，主机 %s", app_cfg.port,
                  [h.id for h in app_cfg.hosts] or "(无)")
         await registry.start()

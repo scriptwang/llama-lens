@@ -107,7 +107,16 @@ async def chat(host_id: str, req: ChatReq, request: Request, user: str = Depends
                             usage_tokens = int(usage["completion_tokens"])
                         for choice in chunk.get("choices") or []:
                             delta = (choice or {}).get("delta") or {}
+                            reasoning = delta.get("reasoning_content")
                             content = delta.get("content")
+                            # 思考 token（reasoning_content）：转发给前端展示，并计入 TTFT/tps。
+                            # 否则思考阶段被丢弃 → TTFT 把思考时间算进去（虚高）、
+                            # tps = (思考+回答 tokens) / 仅回答时间（虚高，与监控页不一致）。
+                            if reasoning:
+                                if ttft is None:
+                                    ttft = time.time() - start
+                                delta_count += 1
+                                yield _sse(None, {"reasoning": reasoning})
                             if content:
                                 if ttft is None:
                                     ttft = time.time() - start

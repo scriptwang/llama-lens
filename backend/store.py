@@ -27,6 +27,17 @@ class RingBuffer:
             except Exception:
                 pass  # 持久化失败不影响实时链路
 
+    def load(self, name: str, points: List[Tuple[float, object]]) -> None:
+        """批量载入历史点（不触发 sink，用于启动时从历史 DB 回填环形缓冲）。"""
+        if not points:
+            return
+        dq = self._series.get(name)
+        if dq is None:
+            dq = deque(maxlen=self.maxlen)
+            self._series[name] = dq
+        for ts, v in points:
+            dq.append((ts, v))
+
     def get(self, name: str) -> List[Tuple[float, object]]:
         dq = self._series.get(name)
         return list(dq) if dq else []

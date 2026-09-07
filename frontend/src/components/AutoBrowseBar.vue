@@ -55,12 +55,16 @@ try {
     if (Number.isFinite(saved.interval)) interval.value = Math.min(30, Math.max(2, saved.interval))
   } else {
     enabled.value = props.defaultEnabled
+    if (enabled.value) mode.value = 'carousel'  // 默认开启 → 默认轮播（而非滑动）
   }
 } catch { /* 忽略损坏的本地设置 */ }
 
 // 配置默认值异步到达（uiCfg 在 onMounted 才加载完）：用户未手动切换过时跟随配置
 watch(() => props.defaultEnabled, (v) => {
-  if (!hasSaved && !userToggled) enabled.value = v
+  if (!hasSaved && !userToggled) {
+    enabled.value = v
+    if (v) mode.value = 'carousel'  // 默认开启 → 默认轮播
+  }
 })
 watch(enabled, () => { userToggled = true })
 

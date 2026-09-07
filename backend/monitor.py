@@ -7,6 +7,7 @@
 """
 import asyncio
 import logging
+import json
 import time
 from typing import Any, Dict, List, Optional
 
@@ -225,6 +226,49 @@ class HostMonitor:
             if name.startswith(GPU_PREFIXES):
                 add(self.ring_host, name)
         return {"window": window_s, "series": series}
+
+    def backfill_from_store(self, store) -> None:
+        """启动时从历史 DB 回填环形缓冲，消除容器重启后短窗口（≤1h）的数据缺口。
+
+        只回填最近 max(ring.maxlen, 3600) 秒的原始数据；deque 的 maxlen 会自动
+        截断为最新的一段，保证环形缓冲装满最近 1h。不触发 sink（避免重复写库）。
+        """
+        if store is None:
+            return
+        now = int(time.time())
+        try:
+            t0_llama = now - max(self.ring_llama.maxlen, 3600)
+            lrows = store.query_llama(self.cfg.id, t0_llama, now)
+            if lrows:
+                self.ring_llama.load("gen_speed", [(r[0], r[1]) for r in lrows])
+                self.ring_llama.load("prompt_speed", [(r[0], r[2]) for r in lrows])
+                self.ring_llama.load("ctx_used", [(r[0], r[3]) for r in lrows])
+                self.ring_llama.load("mtp_acceptance", [(r[0], r[4]) for r in lrows])
+
+            t0_host = now - max(self.ring_host.maxlen, 3600)
+            hrows = store.query_host(self.cfg.id, t0_host, now)
+            if hrows:
+                for i, name in enumerate(HOST_SERIES):
+                    self.ring_host.load(name, [(r[0], r[i + 1]) for r in hrows])
+                gpu_acc: Dict[str, List] = {}
+                for r in hrows:
+                    raw = r[11]
+                    if not raw:
+                        continue
+                    try:
+                        data = json.loads(raw)
+                    except (ValueError, TypeError):
+                        continue
+                    for idx, g in data.items():
+                        for key, prefix in (("util", "gpu_util_"), ("mem", "gpu_mem_"),
+                                            ("temp", "gpu_temp_"), ("power", "gpu_power_")):
+                            v = g.get(key)
+                            if v is not None:
+                                gpu_acc.setdefault(prefix + idx, []).append((r[0], v))
+                for name, pts in gpu_acc.items():
+                    self.ring_host.load(name, pts)
+        except Exception:
+            log.exception("[%s] 历史回填失败", self.cfg.id)
 
     def events_list(self, limit: int = 50) -> List[Dict[str, Any]]:
         return self.events.list(limit)
