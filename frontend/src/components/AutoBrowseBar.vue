@@ -1,5 +1,5 @@
 <template>
-  <div ref="barRef" class="ab-bar" :style="{ top: stickyTop }">
+  <div ref="barRef" class="ab-bar">
     <span class="ab-label">自动浏览</span>
     <el-switch v-model="enabled" size="small" />
     <template v-if="enabled">
@@ -31,7 +31,6 @@ import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 // 用户手动滚动（滚轮/触摸）时暂停 5 秒后自动恢复；设置持久化到 localStorage。
 const props = defineProps({
   active: { type: Boolean, default: false },   // 仅监控 Tab 激活时运行
-  stickyTop: { type: String, default: '0px' }, // sticky 定位 top（顶栏+tabs 之下）
   chrome: { type: Number, default: 56 },       // 本条之上的固定区高度（顶栏+tabs），用于计算一屏步长
   defaultEnabled: { type: Boolean, default: false }, // config.yaml ui.auto_browse.enabled 默认开关
 })
@@ -150,8 +149,6 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .ab-bar {
-  position: sticky;
-  z-index: 18;
   display: flex;
   align-items: center;
   gap: 12px;

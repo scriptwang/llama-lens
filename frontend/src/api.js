@@ -17,5 +17,9 @@ export const api = {
   overview: (id) => getJson(`/api/hosts/${encodeURIComponent(id)}/overview`),
   history: (id, window) => getJson(`/api/hosts/${encodeURIComponent(id)}/history?window=${window}`),
   events: (id, limit = 50) => getJson(`/api/hosts/${encodeURIComponent(id)}/events?limit=${limit}`),
-  uiConfig: () => getJson('/api/ui')
+  // /api/ui 是 ctl 接口（{code,msg,data} 信封），需解包
+  uiConfig: async () => {
+    const j = await getJson('/api/ui')
+    return j && typeof j === 'object' && 'data' in j ? j.data : j
+  }
 }

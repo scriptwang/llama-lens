@@ -24,7 +24,7 @@
     <main class="content">
       <!-- ============ 监控 Tab ============ -->
       <div v-show="currentTab === 'monitor'" class="tab-pane">
-        <AutoBrowseBar :active="currentTab === 'monitor' && !!snap" :sticky-top="abTop" :chrome="56 + tabsH" :default-enabled="uiCfg.auto_browse && uiCfg.auto_browse.enabled" />
+        <AutoBrowseBar :active="currentTab === 'monitor' && !!snap" :chrome="56 + tabsH" :default-enabled="uiCfg.auto_browse && uiCfg.auto_browse.enabled" />
         <!-- 首次加载骨架 -->
         <template v-if="!snap">
         <div class="skeleton" style="height: 120px; margin-bottom: 16px"></div>
@@ -597,8 +597,6 @@ const chartMtp = computed(() => {
 // 速度卡 60s spark（取自历史序列尾部）
 const sparkGen = computed(() => mapTail('gen_speed', (v) => v))
 const sparkPrompt = computed(() => mapTail('prompt_speed', (v) => v))
-
-const abTop = computed(() => `calc(var(--chrome-top, 0px) + ${56 + tabsH.value}px)`)
 
 onMounted(() => {
   loadHistory()
