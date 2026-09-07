@@ -6,7 +6,7 @@ import 'element-plus/dist/index.css'
 import 'element-plus/theme-chalk/dark/css-vars.css'
 import {
   ArrowLeft, ArrowRight, ArrowUp, Back, Brush, Close, CopyDocument, Cpu, DataLine,
-  Document, EditPen, Folder, FolderOpened, Grid, Lightning, Monitor, Moon, Odometer,
+  Document, EditPen, FirstAidKit, Folder, FolderOpened, Grid, Lightning, Monitor, Moon, Odometer,
   Operation, Platform, Plus, Refresh, RefreshRight, Search, Setting, Sunny,
   SwitchButton, Timer, VideoPause, VideoPlay, Warning,
 } from '@element-plus/icons-vue'
@@ -32,7 +32,7 @@ app.use(router)
 app.directive('loading', ElLoading.directive)
 const icons = {
   ArrowLeft, ArrowRight, ArrowUp, Back, Brush, Close, CopyDocument, Cpu, DataLine,
-  Document, EditPen, Folder, FolderOpened, Grid, Lightning, Monitor, Moon, Odometer,
+  Document, EditPen, FirstAidKit, Folder, FolderOpened, Grid, Lightning, Monitor, Moon, Odometer,
   Operation, Platform, Plus, Refresh, RefreshRight, Search, Setting, Sunny,
   SwitchButton, Timer, VideoPause, VideoPlay, Warning,
 }

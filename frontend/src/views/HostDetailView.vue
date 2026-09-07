@@ -1,6 +1,7 @@
 <template>
   <div class="detail">
     <TopBar
+      :host-id="props.id"
       :host-name="hostName"
       :model-name="modelName"
       :model-title="modelTitle"

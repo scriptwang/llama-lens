@@ -29,6 +29,9 @@
     </div>
 
     <div class="right">
+      <button class="diag-btn" title="聚合系统/GPU/服务/API/事件/错误日志，生成诊断报告" @click="diagVisible = true">
+        <el-icon style="margin-right:3px"><FirstAidKit /></el-icon>体检
+      </button>
       <ThemeSwitcher />
       <span v-if="!llamaOnline" class="badge danger">llama 离线</span>
       <span v-else-if="!sshOk" class="badge warn">SSH 断开</span>
@@ -45,6 +48,8 @@
       </select>
       <span v-if="degraded" class="badge warn small">WS 断线 · 轮询中</span>
     </div>
+
+    <DiagnosticDialog v-model="diagVisible" :host-id="hostId" :host-label="hostName" />
   </header>
 </template>
 
@@ -53,8 +58,11 @@ import { computed } from 'vue'
 import { fmtTokens, fmtGB, alertLevel } from '../utils'
 import LiveClock from './LiveClock.vue'
 import ThemeSwitcher from './ThemeSwitcher.vue'
+import DiagnosticDialog from './DiagnosticDialog.vue'
+import { ref } from 'vue'
 
 const props = defineProps({
+  hostId: { type: String, default: '' },
   hostName: { type: String, default: '' },
   modelName: { type: String, default: '' },
   modelTitle: { type: String, default: '' },
@@ -66,6 +74,8 @@ const props = defineProps({
   connected: { type: Boolean, default: false }
 })
 const emit = defineEmits(['update:mode'])
+
+const diagVisible = ref(false)
 
 const st = computed(() => props.stats || {})
 const alerts = computed(() => st.value.alerts || [])
@@ -154,6 +164,18 @@ function onModeChange(e) {
 </script>
 
 <style scoped>
+.diag-btn {
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: 1px solid var(--card-border);
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.diag-btn:hover { color: var(--text); border-color: var(--cyan); }
 .topbar {
   height: 56px;
   display: flex;
