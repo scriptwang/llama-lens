@@ -211,25 +211,6 @@ onBeforeUnmount(() => {
 .fb-keyword { width: 180px; }
 .fb-status { width: 104px; }
 .fb-enabled { width: 104px; }
-.fb-keyword :deep(.el-input__wrapper),
-.fb-status :deep(.el-select__wrapper),
-.fb-enabled :deep(.el-select__wrapper) {
-  background: var(--lc-ctrl-bg);
-  box-shadow: 0 0 0 1px var(--lc-border) inset;
-  border-radius: 10px;
-  transition: box-shadow 0.18s ease, background 0.18s ease;
-}
-.fb-keyword:hover :deep(.el-input__wrapper),
-.fb-status:hover :deep(.el-select__wrapper),
-.fb-enabled:hover :deep(.el-select__wrapper) {
-  box-shadow: 0 0 0 1px var(--lc-border-strong) inset;
-}
-.fb-keyword :deep(.el-input__wrapper.is-focus),
-.fb-status :deep(.el-select__wrapper.is-focused),
-.fb-enabled :deep(.el-select__wrapper.is-focused) {
-  box-shadow: 0 0 0 1px var(--lc-primary) inset;
-}
-.fb-keyword :deep(.el-input__prefix) { color: var(--lc-text-muted); }
 .fb-count { font-size: 12px; color: var(--lc-text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .fb-clear { font-size: 12px; padding: 0 6px; }
 </style>

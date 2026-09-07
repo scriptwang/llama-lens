@@ -19,14 +19,16 @@
       </el-button>
     </div>
     <div class="ctl-toolbar mt-search-row">
+      <span class="mt-filter-label">筛选</span>
       <el-input v-model="draft.name" size="small" class="mt-in" placeholder="模型名称" clearable @keyup.enter="applySearch">
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
       <el-input v-model="draft.path" size="small" class="mt-in" placeholder="路径关键词" clearable @keyup.enter="applySearch" />
+      <span class="mt-filter-label">大小 GB</span>
       <div class="mt-size">
-        <el-input-number v-model="draft.minGb" size="small" :min="0" :max="2048" :step="1" :precision="1" :controls="false" placeholder="最小 GB" class="mt-num" />
+        <el-input-number v-model="draft.minGb" size="small" :min="0" :max="2048" :step="1" :precision="1" :controls="false" placeholder="最小" class="mt-num" />
         <span class="mt-dash">—</span>
-        <el-input-number v-model="draft.maxGb" size="small" :min="0" :max="4096" :step="1" :precision="1" :controls="false" placeholder="最大 GB" class="mt-num" />
+        <el-input-number v-model="draft.maxGb" size="small" :min="0" :max="4096" :step="1" :precision="1" :controls="false" placeholder="最大" class="mt-num" />
       </div>
       <el-select v-model="draft.days" size="small" class="mt-days">
         <el-option label="全部时间" :value="0" />
@@ -262,6 +264,7 @@ onMounted(async () => {
 <style scoped>
 .mt-title { font-weight: 600; }
 .mt-search-row { flex-wrap: wrap; }
+.mt-filter-label { font-size: 12px; color: var(--text-dim, #888); white-space: nowrap; }
 .mt-in { width: 190px; }
 .mt-size { display: inline-flex; align-items: center; gap: 4px; }
 .mt-num { width: 88px; }
