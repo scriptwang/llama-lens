@@ -67,7 +67,7 @@
           <span v-else class="mt-muted">—</span>
         </template>
       </el-table-column>
-      <el-table-column label="mmproj" min-width="180">
+      <el-table-column label="mmproj" min-width="180" sortable :sort-method="(a, b) => (a.mmproj_name || 'zzz').localeCompare(b.mmproj_name || 'zzz', 'zh-Hans-CN', { sensitivity: 'base' })">
         <template #default="{ row }">
           <template v-if="row.mmproj">
             <div class="mt-name">{{ row.mmproj_name }}</div>
@@ -76,13 +76,13 @@
           <span v-else class="mt-muted">—</span>
         </template>
       </el-table-column>
-      <el-table-column label="占用服务" min-width="150">
+      <el-table-column label="占用服务" min-width="150" sortable :sort-method="(a, b) => ((a.used_by && a.used_by.length) || 0) - ((b.used_by && b.used_by.length) || 0)">
         <template #default="{ row }">
           <el-tag v-for="s in row.used_by" :key="s" size="small" type="success" effect="plain" class="mt-svc-tag">{{ s }}</el-tag>
           <span v-if="!row.used_by.length" class="mt-muted">—</span>
         </template>
       </el-table-column>
-      <el-table-column label="适配预估" min-width="220">
+      <el-table-column label="适配预估" min-width="220" sortable :sort-method="(a, b) => fitOrder(a.fit && a.fit.level) - fitOrder(b.fit && b.fit.level)">
         <template #default="{ row }">
           <el-tag :type="fitType(row.fit.level)" size="small">{{ fitLabel(row.fit.level) }}</el-tag>
           <div class="mt-fit-note">{{ row.fit.note }}</div>
@@ -194,6 +194,9 @@ function fitType(level) {
 }
 function fitLabel(level) {
   return { ok: '装得下', tight: '紧张', no: '装不下', unknown: '未知' }[level] || level
+}
+function fitOrder(level) {
+  return { ok: 0, tight: 1, no: 2, unknown: 3 }[level] ?? 4
 }
 
 // 从服务 ExecStart 提取当前 -m 值（简单解析，供对话框展示）

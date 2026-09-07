@@ -1,36 +1,138 @@
 <template>
-  <el-dialog v-model="visible" title="一键体检" width="760px" top="6vh" append-to-body :close-on-click-modal="false">
+  <el-dialog v-model="visible" title="一键体检" width="880px" top="5vh" append-to-body :close-on-click-modal="false">
     <div v-loading="loading" class="diag">
-      <div v-if="summary" class="diag-summary">
-        <el-tag :type="summary.llama_online ? 'success' : 'danger'" size="small">
-          llama {{ summary.llama_online ? '在线' : '离线' }}
-        </el-tag>
-        <el-tag :type="summary.ssh_ok ? 'success' : 'danger'" size="small">
-          SSH {{ summary.ssh_ok ? '已连接' : '断开' }}
-        </el-tag>
-        <el-tag :type="summary.alerts ? 'warning' : 'info'" size="small">告警 {{ summary.alerts }}</el-tag>
-        <el-tag type="info" size="small">服务 {{ summary.services }}</el-tag>
-        <el-tag type="info" size="small">事件 {{ summary.events }}</el-tag>
-        <el-tag :type="summary.error_logs ? 'danger' : 'info'" size="small">错误日志 {{ summary.error_logs }}</el-tag>
-      </div>
+      <template v-if="data">
+        <!-- 头部：主机 + 时间 + 状态标签 -->
+        <div class="dg-head">
+          <div class="dg-host">
+            <span class="dg-host-name">{{ data.host.name }}</span>
+            <span class="dg-host-addr">{{ data.host.host }}:{{ data.host.port }}</span>
+            <span class="dg-host-time">生成于 {{ data.host.generated_at }}</span>
+          </div>
+          <div class="dg-chips">
+            <el-tag :type="data.overall.llama_online ? 'success' : 'danger'" size="small" effect="dark" round>
+              llama {{ data.overall.llama_online ? '在线' : '离线' }}
+            </el-tag>
+            <el-tag :type="data.overall.ssh_ok ? 'success' : 'danger'" size="small" effect="dark" round>
+              SSH {{ data.overall.ssh_ok ? '已连接' : '断开' }}
+            </el-tag>
+            <el-tag :type="data.overall.alerts_total ? 'warning' : 'info'" size="small" effect="dark" round>
+              告警 {{ data.overall.alerts_total }}
+            </el-tag>
+            <el-tag :type="data.error_logs.length ? 'danger' : 'info'" size="small" effect="dark" round>
+              错误日志 {{ data.error_logs.length }}
+            </el-tag>
+          </div>
+        </div>
 
-      <div v-if="blocks.length" class="diag-body">
-        <template v-for="(b, i) in blocks" :key="i">
-          <h2 v-if="b.type === 'title'" class="diag-title">{{ b.text }}</h2>
-          <h3 v-else-if="b.type === 'h2'" class="diag-h2">{{ b.text }}</h3>
-          <p v-else-if="b.type === 'p'" class="diag-p" v-html="inline(b.text)"></p>
-          <ul v-else-if="b.type === 'list'" class="diag-list">
-            <li v-for="(it, j) in b.items" :key="j" :class="{ sub: it.indent }" v-html="inline(it.text)"></li>
-          </ul>
-          <table v-else-if="b.type === 'table'" class="diag-table">
-            <thead><tr><th v-for="(c, j) in b.head" :key="j">{{ c }}</th></tr></thead>
-            <tbody>
-              <tr v-for="(r, j) in b.body" :key="j"><td v-for="(c, k) in r" :key="k">{{ c }}</td></tr>
-            </tbody>
-          </table>
-          <pre v-else-if="b.type === 'code'" class="diag-code">{{ b.lines.join('\n') }}</pre>
-        </template>
-      </div>
+        <!-- 卡片网格 -->
+        <div class="dg-grid">
+          <!-- 总体状态 -->
+          <div class="dg-card">
+            <div class="dg-card-title"><el-icon><FirstAidKit /></el-icon>总体状态</div>
+            <div class="dg-kv">
+              <span class="k">llama</span><b :class="data.overall.llama_online ? 'v-ok' : 'v-bad'">{{ data.overall.llama_online ? '在线' : '离线' }}</b>
+              <span class="k">SSH</span><b :class="data.overall.ssh_ok ? 'v-ok' : 'v-bad'">{{ data.overall.ssh_ok ? '已连接' : '断开' }}</b>
+              <span class="k">告警</span><b>{{ data.overall.alerts_total }} 条</b>
+              <span class="k">danger</span><b class="v-bad">{{ data.overall.alerts_danger }}</b>
+              <span class="k">warn</span><b class="v-warn">{{ data.overall.alerts_warn }}</b>
+            </div>
+            <div v-if="data.overall.alert_items.length" class="dg-alerts">
+              <div v-for="(a, i) in data.overall.alert_items" :key="i" class="dg-alert" :class="a.level">
+                <span class="lv">[{{ a.level }}]</span> {{ a.metric }}：{{ a.value }} ≥ {{ a.threshold }}
+              </div>
+            </div>
+            <div v-else class="dg-none">无活动告警</div>
+          </div>
+
+          <!-- llama API -->
+          <div class="dg-card">
+            <div class="dg-card-title"><el-icon><Lightning /></el-icon>llama API</div>
+            <div class="dg-kv">
+              <span class="k">/health</span><b :class="data.llama_api.online ? 'v-ok' : 'v-bad'">{{ data.llama_api.online ? 'OK（在线）' : '失败（离线）' }}</b>
+              <span class="k">模型</span><b class="dg-model">{{ data.llama_api.model }}</b>
+              <span class="k">生成速度</span><b>{{ data.llama_api.gen_speed_tps.toFixed(1) }} tok/s</b>
+            </div>
+          </div>
+
+          <!-- 系统 -->
+          <div class="dg-card">
+            <div class="dg-card-title"><el-icon><Monitor /></el-icon>系统</div>
+            <div class="dg-metric">
+              <div class="dg-metric-head"><span>CPU</span><b>{{ pct(data.system.cpu_pct) }}</b></div>
+              <div class="dg-bar"><i :class="barLevel(data.system.cpu_pct)" :style="{ width: (data.system.cpu_pct || 0) + '%' }"></i></div>
+            </div>
+            <div class="dg-metric">
+              <div class="dg-metric-head"><span>内存</span><b>{{ data.system.mem_used_gib != null ? data.system.mem_used_gib + ' / ' + data.system.mem_total_gib + ' GiB' : '—' }}（{{ pct(data.system.mem_pct) }}）</b></div>
+              <div class="dg-bar"><i :class="barLevel(data.system.mem_pct)" :style="{ width: (data.system.mem_pct || 0) + '%' }"></i></div>
+            </div>
+            <div class="dg-metric">
+              <div class="dg-metric-head"><span>负载</span><b>{{ (data.system.load.length ? data.system.load.map((x) => x.toFixed(2)).join(' / ') : '— / — / —') }}</b></div>
+            </div>
+            <div v-for="(d, i) in data.system.disks" :key="i" class="dg-metric">
+              <div class="dg-metric-head"><span>磁盘 {{ d.mount }}</span><b>{{ d.used_gb }} / {{ d.size_gb }} GiB（{{ pct(d.use_pct) }}）</b></div>
+              <div class="dg-bar"><i :class="barLevel(d.use_pct)" :style="{ width: (d.use_pct || 0) + '%' }"></i></div>
+            </div>
+            <div class="dg-metric">
+              <div class="dg-metric-head"><span>网络</span><b>{{ data.system.has_net ? 'rx ' + data.system.net_rx + ' / tx ' + data.system.net_tx + ' MB/s' : '—' }}</b></div>
+            </div>
+          </div>
+
+          <!-- GPU -->
+          <div class="dg-card">
+            <div class="dg-card-title"><el-icon><Cpu /></el-icon>GPU（{{ data.gpus.length }}）</div>
+            <div v-if="!data.gpus.length" class="dg-none">无 GPU 数据</div>
+            <div v-for="g in data.gpus" :key="g.index" class="dg-gpu">
+              <div class="dg-gpu-head">
+                <b>GPU{{ g.index }}</b>
+                <span class="dim">{{ g.name }}</span>
+              </div>
+              <div class="dg-bar"><i :class="barLevel(g.util_pct)" :style="{ width: (g.util_pct || 0) + '%' }"></i></div>
+              <div class="dg-gpu-meta">
+                <span>利用率 <b>{{ pct(g.util_pct) }}</b></span>
+                <span>显存 <b>{{ g.mem_used_gib != null ? g.mem_used_gib + '/' + g.mem_total_gib + ' GiB' : '—' }}</b></span>
+                <span>温度 <b>{{ g.temp_c != null ? g.temp_c + '°C' : '—' }}</b></span>
+                <span>功耗 <b>{{ g.power_w != null ? g.power_w + ' W' : '—' }}</b></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 服务 -->
+          <div class="dg-card">
+            <div class="dg-card-title"><el-icon><Platform /></el-icon>服务（{{ data.services.length }}）</div>
+            <div v-if="!data.services.length" class="dg-none">未扫描到服务</div>
+            <div v-for="s in data.services" :key="s.name" class="dg-svc">
+              <span class="dot" :class="s.active_state === 'active' ? 'ok' : (s.active_state === 'failed' ? 'bad' : 'off')"></span>
+              <span class="name">{{ s.name }}</span>
+              <span class="dim">{{ s.active_state }}（{{ s.sub_state }}）</span>
+              <span class="dim">自启 {{ s.unit_file_state }}</span>
+            </div>
+          </div>
+
+          <!-- 最近事件 -->
+          <div class="dg-card">
+            <div class="dg-card-title"><el-icon><DataLine /></el-icon>最近事件（{{ data.events.length }}）</div>
+            <div v-if="!data.events.length" class="dg-none">无</div>
+            <div v-else class="dg-evs">
+              <div v-for="(e, i) in data.events" :key="i" class="dg-ev">
+                <span class="ev-ts">{{ e.ts }}</span>
+                <span class="ev-lv" :class="e.level">[{{ e.level }}]</span>
+                <span class="ev-msg">{{ e.type }}：{{ e.msg }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 错误日志 -->
+          <div class="dg-card span2">
+            <div class="dg-card-title"><el-icon><Document /></el-icon>最近错误日志（{{ data.error_logs.length }}）</div>
+            <div v-if="!data.error_logs.length" class="dg-none">无</div>
+            <pre v-else class="dg-code">{{ data.error_logs.join('\n') }}</pre>
+          </div>
+        </div>
+      </template>
+
+      <!-- 旧后端兜底：无结构化数据时展示 markdown -->
+      <pre v-else-if="markdown && !loading" class="diag-md">{{ markdown }}</pre>
       <el-empty v-else-if="!loading" description="生成失败" :image-size="50" />
     </div>
     <template #footer>
@@ -51,7 +153,7 @@ import { ElMessage } from 'element-plus'
 import http from '../api/client'
 import { api } from '../api'
 
-// 一键体检（P2-1）：聚合诊断报告，结构化展示（分节/表格/列表/代码块）+ 复制/下载 markdown。
+// 一键体检（P2-1）：卡片式仪表盘展示（总体/系统/GPU/服务/API/事件/错误日志）+ 复制/下载 markdown。
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
   hostId: { type: String, required: true },  // mid
@@ -65,72 +167,30 @@ const visible = computed({
 })
 const loading = ref(false)
 const markdown = ref('')
-const summary = ref(null)
+const data = ref(null)
 
-// ---------------- 轻量 markdown 解析（仅覆盖体检报告用到的语法） ----------------
-function parseMd(md) {
-  const lines = (md || '').split('\n')
-  const blocks = []
-  let i = 0
-  while (i < lines.length) {
-    const line = lines[i]
-    if (!line.trim()) { i++; continue }
-    if (line.startsWith('# ')) { blocks.push({ type: 'title', text: line.slice(2) }); i++; continue }
-    if (line.startsWith('## ')) { blocks.push({ type: 'h2', text: line.slice(3) }); i++; continue }
-    if (line.trim() === '```') {
-      const code = []
-      i++
-      while (i < lines.length && lines[i].trim() !== '```') { code.push(lines[i]); i++ }
-      i++
-      blocks.push({ type: 'code', lines: code })
-      continue
-    }
-    if (line.trim().startsWith('|')) {
-      const rows = []
-      while (i < lines.length && lines[i].trim().startsWith('|')) { rows.push(lines[i]); i++ }
-      const parse = (r) => r.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim())
-      blocks.push({ type: 'table', head: parse(rows[0]), body: rows.slice(2).map(parse) })
-      continue
-    }
-    if (/^\s*- /.test(line)) {
-      const items = []
-      while (i < lines.length && /^\s*- /.test(lines[i])) {
-        items.push({ indent: lines[i].startsWith('  ') ? 1 : 0, text: lines[i].replace(/^\s*- /, '') })
-        i++
-      }
-      blocks.push({ type: 'list', items })
-      continue
-    }
-    blocks.push({ type: 'p', text: line })
-    i++
-  }
-  return blocks
+function pct(v) {
+  return v == null ? '—' : Math.round(v) + '%'
 }
-const blocks = computed(() => parseMd(markdown.value))
-
-function esc(s) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-// 行内：**加粗** + [danger]/[warn] 等级着色
-function inline(text) {
-  let h = esc(text)
-  h = h.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
-  h = h.replace(/\[(danger|warn|ok|info)\]/g, (m, lv) => `<i class="lv-${lv}">[${lv}]</i>`)
-  return h
+function barLevel(v) {
+  if (v == null) return ''
+  if (v >= 90) return 'danger'
+  if (v >= 75) return 'warn'
+  return ''
 }
 
 watch(() => props.modelValue, async (open) => {
   if (!open) return
   loading.value = true
   markdown.value = ''
-  summary.value = null
+  data.value = null
   try {
     const hosts = await api.hosts()
     const h = hosts.find((x) => x.id === props.hostId)
     if (!h) throw new Error('未知主机')
-    const data = await http.get(`/hosts/${h.db_id}/diagnostic`)
-    markdown.value = data.markdown
-    summary.value = data.summary
+    const res = await http.get(`/hosts/${h.db_id}/diagnostic`)
+    markdown.value = res.markdown
+    data.value = res.data || null
   } catch (e) { /* client 已提示 */ } finally {
     loading.value = false
   }
@@ -157,69 +217,172 @@ function downloadMd() {
 
 <style scoped>
 .diag { min-height: 200px; }
-.diag-summary { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
-.diag-body {
-  max-height: 58vh;
-  overflow: auto;
-  background: var(--bg);
+/* 头部 */
+.dg-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.dg-host { display: flex; align-items: baseline; gap: 10px; }
+.dg-host-name { font-size: 16px; font-weight: 700; color: var(--text); }
+.dg-host-addr { font-size: 12px; color: var(--text-dim); font-family: var(--font-mono, monospace); }
+.dg-host-time { font-size: 11px; color: var(--text-faint); }
+.dg-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+/* 卡片网格 */
+.dg-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  max-height: 62vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.dg-card {
+  background: var(--card-bg);
   border: 1px solid var(--card-border);
-  border-radius: 8px;
-  padding: 16px 18px;
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
 }
-.diag-title {
-  margin: 0 0 4px;
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--text);
-}
-.diag-h2 {
-  margin: 18px 0 8px;
-  padding-left: 9px;
-  border-left: 3px solid var(--cyan);
+.dg-card.span2 { grid-column: span 2; }
+.dg-card-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   font-size: 13px;
   font-weight: 700;
   color: var(--text);
 }
-.diag-h2:first-child { margin-top: 0; }
-.diag-p { margin: 4px 0; font-size: 12.5px; color: var(--text-dim); }
-.diag-list { margin: 4px 0; padding-left: 18px; }
-.diag-list li { font-size: 12.5px; line-height: 1.7; color: var(--text); }
-.diag-list li.sub { padding-left: 14px; color: var(--text-dim); }
-.diag-list li::marker { color: var(--text-faint); }
-.diag-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 6px 0;
+.dg-card-title .el-icon { color: var(--cyan); font-size: 15px; }
+.dg-none { font-size: 12px; color: var(--text-faint); }
+/* 键值对 */
+.dg-kv {
+  display: grid;
+  grid-template-columns: auto 1fr auto 1fr;
+  gap: 6px 10px;
+  font-size: 12.5px;
+  align-items: baseline;
+}
+.dg-kv .k { color: var(--text-dim); }
+.dg-kv b { color: var(--text); font-weight: 600; word-break: break-all; }
+.dg-kv .v-ok { color: var(--green); }
+.dg-kv .v-bad { color: var(--red); }
+.dg-kv .v-warn { color: var(--amber); }
+.dg-model { font-family: var(--font-mono, monospace); font-size: 11.5px; }
+/* 告警 */
+.dg-alerts { display: flex; flex-direction: column; gap: 4px; }
+.dg-alert {
   font-size: 12px;
-}
-.diag-table th, .diag-table td {
-  border: 1px solid var(--card-border);
   padding: 5px 10px;
-  text-align: left;
-}
-.diag-table th {
-  background: color-mix(in srgb, var(--cyan) 8%, transparent);
-  color: var(--text);
-  font-weight: 600;
-  white-space: nowrap;
-}
-.diag-table td { color: var(--text-dim); font-variant-numeric: tabular-nums; }
-.diag-table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--text) 3%, transparent); }
-.diag-code {
-  margin: 6px 0;
-  padding: 10px 12px;
   border-radius: 6px;
-  background: var(--card-bg);
+  border: 1px solid;
+}
+.dg-alert.danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 35%, transparent); background: color-mix(in srgb, var(--red) 8%, transparent); }
+.dg-alert.warn { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 35%, transparent); background: color-mix(in srgb, var(--amber) 8%, transparent); }
+.dg-alert .lv { font-weight: 700; margin-right: 4px; }
+/* 指标条 */
+.dg-metric { display: flex; flex-direction: column; gap: 4px; }
+.dg-metric-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.dg-metric-head b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.dg-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  overflow: hidden;
+}
+.dg-bar i { display: block; height: 100%; border-radius: 3px; background: var(--green); transition: width .3s ease; }
+.dg-bar i.warn { background: var(--amber); }
+.dg-bar i.danger { background: var(--red); }
+/* GPU */
+.dg-gpu {
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  background: color-mix(in srgb, var(--text) 2%, transparent);
+}
+.dg-gpu-head { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; }
+.dg-gpu-head b { color: var(--text); }
+.dg-gpu-head .dim { color: var(--text-dim); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dg-gpu-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px 12px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+.dg-gpu-meta b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+/* 服务 */
+.dg-svc {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  padding: 5px 0;
+  border-bottom: 1px dashed color-mix(in srgb, var(--text) 8%, transparent);
+}
+.dg-svc:last-child { border-bottom: none; }
+.dg-svc .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.dg-svc .dot.ok { background: var(--green); }
+.dg-svc .dot.bad { background: var(--red); }
+.dg-svc .dot.off { background: var(--text-faint); }
+.dg-svc .name { font-weight: 600; color: var(--text); font-family: var(--font-mono, monospace); font-size: 12px; }
+.dg-svc .dim { color: var(--text-dim); font-size: 11.5px; }
+/* 事件 */
+.dg-evs { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; }
+.dg-ev { display: flex; gap: 8px; font-size: 11.5px; align-items: baseline; }
+.ev-ts { color: var(--text-faint); font-family: var(--font-mono, monospace); flex: none; }
+.ev-lv { font-weight: 700; flex: none; }
+.ev-lv.danger { color: var(--red); }
+.ev-lv.warn { color: var(--amber); }
+.ev-lv.info, .ev-lv { color: var(--text-dim); }
+.ev-msg { color: var(--text-dim); word-break: break-all; }
+/* 错误日志 */
+.dg-code {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg);
   border: 1px solid var(--card-border);
   font-size: 11.5px;
   line-height: 1.6;
   font-family: var(--font-mono, monospace);
   color: var(--text-dim);
+  max-height: 200px;
+  overflow: auto;
   white-space: pre-wrap;
   word-break: break-all;
 }
-:deep(.lv-danger) { color: var(--red); font-style: normal; font-weight: 600; }
-:deep(.lv-warn) { color: var(--amber); font-style: normal; font-weight: 600; }
-:deep(.lv-ok) { color: var(--green); font-style: normal; }
-:deep(.lv-info) { color: var(--text-dim); font-style: normal; }
+/* 兜底 markdown */
+.diag-md {
+  max-height: 60vh;
+  overflow: auto;
+  background: var(--bg);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 14px;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono, monospace);
+}
+@media (max-width: 760px) {
+  .dg-grid { grid-template-columns: 1fr; }
+  .dg-card.span2 { grid-column: span 1; }
+}
 </style>

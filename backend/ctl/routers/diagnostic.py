@@ -146,6 +146,80 @@ def _build_markdown(row, snap, services, events, err_logs) -> str:
     return "\n".join(L)
 
 
+def _build_data(row, snap, services, events, err_logs) -> dict:
+    """结构化体检数据（前端卡片渲染用；markdown 保留给复制/下载）"""
+    ll = (snap or {}).get("llama") or {}
+    hm = (snap or {}).get("host_metrics") or {}
+    alerts = (snap or {}).get("alerts") or []
+    danger = [a for a in alerts if a["level"] == "danger"]
+    warn = [a for a in alerts if a["level"] == "warn"]
+    cpu = hm.get("cpu") or {}
+    mem = hm.get("mem") or {}
+    disk = hm.get("disk") or {}
+    net = hm.get("net") or {}
+    ifaces = net.get("ifaces") or []
+    model = ll.get("model") or {}
+    return {
+        "host": {
+            "name": row["alias"] or row["host"],
+            "host": row["host"],
+            "port": row["port"],
+            "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        },
+        "overall": {
+            "llama_online": bool(ll.get("online")),
+            "ssh_ok": bool(hm.get("reachable")),
+            "alerts_total": len(alerts),
+            "alerts_danger": len(danger),
+            "alerts_warn": len(warn),
+            "alert_items": [
+                {"level": a["level"], "metric": a.get("metric", ""),
+                 "value": a.get("value"), "threshold": a.get("threshold")}
+                for a in (danger + warn)[:10]
+            ],
+        },
+        "system": {
+            "cpu_pct": cpu.get("usage_pct"),
+            "load": (cpu.get("load") or [])[:3],
+            "mem_used_gib": round(mem["used_mb"] / 1024, 1) if mem.get("used_mb") is not None else None,
+            "mem_total_gib": round(mem["total_mb"] / 1024, 1) if mem.get("total_mb") is not None else None,
+            "mem_pct": round(mem["used_mb"] / mem["total_mb"] * 100) if mem.get("total_mb") else None,
+            "disks": [
+                {"mount": m.get("mount", ""), "use_pct": m.get("use_pct"),
+                 "used_gb": m.get("used_gb") or 0, "size_gb": m.get("size_gb") or 0}
+                for m in (disk.get("mounts") or [])[:6]
+            ],
+            "net_rx": round(sum(i.get("rx_mb_s") or 0 for i in ifaces), 1),
+            "net_tx": round(sum(i.get("tx_mb_s") or 0 for i in ifaces), 1),
+            "has_net": bool(ifaces),
+        },
+        "gpus": [
+            {"index": g.get("index", 0), "name": g.get("name") or "—",
+             "util_pct": g.get("util_pct"),
+             "mem_used_gib": round(g["mem_used_mb"] / 1024, 1) if g.get("mem_used_mb") is not None else None,
+             "mem_total_gib": round(g["mem_total_mb"] / 1024, 1) if g.get("mem_total_mb") is not None else None,
+             "temp_c": g.get("temp_c"), "power_w": g.get("power_w")}
+            for g in (hm.get("gpus") or [])
+        ],
+        "services": [
+            {"name": s["name"], "active_state": s["active_state"],
+             "sub_state": s.get("sub_state") or "—", "unit_file_state": s.get("unit_file_state") or "—"}
+            for s in services
+        ],
+        "llama_api": {
+            "online": bool(ll.get("online")),
+            "model": model.get("name") or "—",
+            "gen_speed_tps": ll.get("gen_speed_tps") or 0,
+        },
+        "events": [
+            {"ts": time.strftime("%m-%d %H:%M:%S", time.localtime(ev.get("ts", 0))),
+             "level": ev.get("level", ""), "type": ev.get("type", ""), "msg": ev.get("msg", "")}
+            for ev in reversed(events[-50:])
+        ],
+        "error_logs": err_logs[-50:],
+    }
+
+
 def _error_logs(client, row) -> list:
     """按日志源取最近错误日志：journal → journalctl -p err；file → tail + grep"""
     if (row["log_source"] or "journal") == "file" and row["log_path"]:
@@ -178,6 +252,7 @@ def diagnostic(host_id: int, request: Request, user: str = Depends(get_current_u
     markdown = _build_markdown(row, snap, services, events, err_logs)
     return ok({
         "markdown": markdown,
+        "data": _build_data(row, snap, services, events, err_logs),
         "generated_at": time.time(),
         "summary": {
             "llama_online": bool((snap or {}).get("llama", {}).get("online")),
