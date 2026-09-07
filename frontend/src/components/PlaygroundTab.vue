@@ -19,11 +19,12 @@
       </div>
       <div v-for="(m, i) in chat" :key="i" class="pg-msg" :class="m.role">
         <div class="pg-role">{{ m.role === 'user' ? '你' : '助手' }}</div>
-        <div class="pg-content">
+        <div class="pg-content" :class="{ 'is-md': m.role === 'assistant' }">
           <template v-if="m.images && m.images.length">
             <img v-for="(src, j) in m.images" :key="j" :src="src" class="pg-img" />
           </template>
-          <span v-if="m.content">{{ m.content }}</span>
+          <span v-if="m.role === 'assistant' && m.content" class="pg-md" v-html="asstHtml(m, i)"></span>
+          <span v-else-if="m.content">{{ m.content }}</span>
           <span v-else-if="streaming && i === chat.length - 1" class="pg-cursor">▍</span>
           <span v-else-if="m.error" class="pg-err">{{ m.error }}</span>
           <span v-else class="pg-muted">（无内容）</span>
@@ -74,9 +75,9 @@
 
       <!-- 输入行 -->
       <div class="pg-row">
-        <el-input ref="taRef" v-model="input" type="textarea" :rows="3" resize="none"
-          placeholder="输入消息，Enter 发送，Shift+Enter 换行；可添加图片（需模型带 mmproj）"
-          @keydown.enter.exact.prevent="send" />
+        <el-input ref="taRef" v-model="input" type="textarea" :rows="3" resize="vertical"
+          placeholder="输入消息，Enter 发送，Shift+Enter 换行；可添加/粘贴图片（需模型带 mmproj）"
+          @keydown.enter.exact.prevent="send" @paste="onPaste" />
         <div class="pg-btns">
           <el-button class="pg-attach" title="添加图片" @click="fileRef && fileRef.click()">
             <el-icon :size="18"><Picture /></el-icon>
@@ -117,6 +118,7 @@
 <script setup>
 import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { renderMd } from '../utils/md'
 
 // Playground Tab（P1-1）：代理 llama-server 聊天（SSE 流式）+ TTFT/tokens/s 指标。
 // 增强：图片消息（mmproj）、采样参数（top_k/top_p/min_p/重复惩罚/max_tokens）、
@@ -270,28 +272,48 @@ function downscale(file, maxSide = 1024, quality = 0.85) {
     img.src = url
   })
 }
-async function onPickImages(e) {
-  const files = Array.from(e.target.files || [])
-  e.target.value = ''
+async function addImageFiles(files) {
   for (const f of files) {
     if (!f.type || !f.type.startsWith('image/')) continue
     if (pendingImages.value.length >= MAX_IMAGES) { ElMessage.warning(`最多 ${MAX_IMAGES} 张图片`); break }
     try {
       pendingImages.value.push(await downscale(f))
     } catch {
-      ElMessage.error(`图片读取失败：${f.name}`)
+      ElMessage.error(`图片读取失败：${f.name || '粘贴图片'}`)
     }
   }
 }
+async function onPickImages(e) {
+  const files = Array.from(e.target.files || [])
+  e.target.value = ''
+  await addImageFiles(files)
+}
+// Ctrl+V 粘贴图片
+async function onPaste(e) {
+  const items = Array.from((e.clipboardData && e.clipboardData.items) || [])
+  const files = items
+    .filter((i) => i.type && i.type.startsWith('image/'))
+    .map((i) => i.getAsFile())
+    .filter(Boolean)
+  if (!files.length) return
+  e.preventDefault()
+  await addImageFiles(files)
+}
 
-// ---------------- 输入框自适应高度 ----------------
+// ---------------- 输入框高度：默认随内容自适应，手动拉伸后以用户为准 ----------------
+let userResized = false
 function autoGrow() {
+  if (userResized) return
   const ta = taRef.value && taRef.value.textarea
   if (!ta) return
   ta.style.height = 'auto'
   ta.style.height = Math.min(Math.max(ta.scrollHeight, 84), 240) + 'px'
 }
 watch(input, autoGrow)
+function bindTaResize() {
+  const ta = taRef.value && taRef.value.textarea
+  if (ta) ta.addEventListener('resize', () => { userResized = true })
+}
 
 // ---------------- 聊天 ----------------
 async function loadInfo() {
@@ -337,6 +359,13 @@ function handleFrame(frame, asstMsg) {
   }
 }
 
+// 助手消息：Markdown 渲染；流式时在末尾追加快闪光标
+function asstHtml(m, i) {
+  let html = renderMd(m.content)
+  if (streaming.value && i === chat.value.length - 1) html += '<span class="pg-cursor">▍</span>'
+  return html
+}
+
 // 消息 → OpenAI 格式（带图片时 content 为多模态数组）
 function toApiMessages() {
   return chat.value
@@ -358,6 +387,8 @@ async function send() {
   pendingImages.value = []
   const asstMsg = { role: 'assistant', content: '', metrics: null, error: '' }
   chat.value.push({ role: 'user', content: text, images }, asstMsg)
+  // 必须通过响应式数组取 proxy 再修改，直接改原对象不触发渲染（会整段一次性显示）
+  const asst = chat.value[chat.value.length - 1]
   // 会话标题：取首条用户消息
   const sess = store.sessions[store.current]
   if (sess && sess.title === '新会话') {
@@ -395,11 +426,11 @@ async function send() {
       while ((idx = buf.indexOf('\n\n')) >= 0) {
         const frame = buf.slice(0, idx)
         buf = buf.slice(idx + 2)
-        handleFrame(frame, asstMsg)
+        handleFrame(frame, asst)
       }
     }
   } catch (e) {
-    asstMsg.error = String((e && e.message) || e)
+    asst.error = String((e && e.message) || e)
   } finally {
     streaming.value = false
     scrollBottom()
@@ -411,6 +442,7 @@ onMounted(() => {
   loadInfo()
   loadStore()
   autoGrow()
+  bindTaResize()
 })
 </script>
 
@@ -464,9 +496,48 @@ onMounted(() => {
   line-height: 1.6;
   padding: 8px 12px;
   border-radius: 8px;
-  background: var(--bg);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  border: 1px solid var(--card-border);
 }
-.pg-msg.user .pg-content { background: color-mix(in srgb, var(--cyan) 12%, var(--bg)); }
+.pg-content.is-md { white-space: normal; }
+.pg-md :deep(p) { margin: 0 0 8px; }
+.pg-md :deep(p:last-child) { margin-bottom: 0; }
+.pg-md :deep(pre) {
+  background: var(--bg);
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.pg-md :deep(code) { font-family: var(--font-mono, monospace); font-size: 12px; }
+.pg-md :deep(:not(pre) > code) {
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.pg-md :deep(h1), .pg-md :deep(h2), .pg-md :deep(h3), .pg-md :deep(h4) {
+  margin: 10px 0 6px;
+  font-size: 14px;
+  font-weight: 700;
+}
+.pg-md :deep(h1):first-child, .pg-md :deep(h2):first-child, .pg-md :deep(h3):first-child { margin-top: 0; }
+.pg-md :deep(ul), .pg-md :deep(ol) { margin: 4px 0; padding-left: 20px; }
+.pg-md :deep(li) { margin: 2px 0; }
+.pg-md :deep(table) { border-collapse: collapse; margin: 8px 0; font-size: 12px; display: block; overflow-x: auto; }
+.pg-md :deep(th), .pg-md :deep(td) { border: 1px solid var(--card-border); padding: 4px 8px; }
+.pg-md :deep(th) { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.pg-md :deep(blockquote) {
+  border-left: 3px solid var(--card-border);
+  padding-left: 10px;
+  margin: 8px 0;
+  color: var(--text-dim);
+}
+.pg-md :deep(a) { color: var(--cyan); }
+.pg-msg.user .pg-content {
+  background: color-mix(in srgb, var(--cyan) 12%, transparent);
+  border-color: color-mix(in srgb, var(--cyan) 25%, transparent);
+}
 .pg-img {
   display: block;
   max-width: 240px;
@@ -518,7 +589,7 @@ onMounted(() => {
 }
 /* 输入行 */
 .pg-row { display: flex; gap: 10px; align-items: flex-end; }
-.pg-row :deep(.el-textarea__inner) { min-height: 84px; }
+.pg-row :deep(.el-textarea__inner) { min-height: 84px; max-height: 320px; }
 .pg-btns { display: flex; flex-direction: column; gap: 8px; flex: none; }
 .pg-attach { width: 42px; }
 .pg-row .pg-btns .el-button:last-child { height: 42px; }
