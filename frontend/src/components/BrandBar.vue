@@ -14,6 +14,7 @@
       <span class="conn" :class="connected ? 'ok' : 'bad'">{{ connected ? 'WS 实时' : '轮询中' }}</span>
       <button class="ctl-entry" @click="hostMgr = true">⚙ 主机管理</button>
       <ThemeSwitcher />
+      <AccountMenu />
       <span class="clock-sep"></span>
       <LiveClock />
     </div>
@@ -27,6 +28,7 @@
 import { computed, ref, watch } from 'vue'
 import LiveClock from './LiveClock.vue'
 import ThemeSwitcher from './ThemeSwitcher.vue'
+import AccountMenu from './AccountMenu.vue'
 import HostManager from './HostManager.vue'
 import { totalSpeed as globalSpeed } from '../speed'
 

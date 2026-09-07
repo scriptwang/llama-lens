@@ -262,6 +262,7 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.ctl-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .mt-title { font-weight: 600; }
 .mt-search-row { flex-wrap: wrap; margin-top: 10px; }
 .mt-filter-label { font-size: 12px; color: var(--text-dim, #888); white-space: nowrap; }

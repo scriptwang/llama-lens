@@ -17,12 +17,14 @@
           <span v-else class="bp-empty">未配置</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="210">
+      <el-table-column label="操作" width="236">
         <template #default="{ row }">
-          <el-button size="small" text type="primary" :loading="testingId === row.id" @click="test(row)">测试</el-button>
-          <el-button size="small" text type="primary" @click="openEdit(row)">编辑</el-button>
-          <el-button size="small" text type="primary" @click="use(row)">使用</el-button>
-          <el-button size="small" text type="danger" @click="remove(row)">删除</el-button>
+          <div class="row-ops">
+            <el-button size="small" text type="primary" :loading="testingId === row.id" @click="test(row)">测试</el-button>
+            <el-button size="small" text type="primary" @click="openEdit(row)">编辑</el-button>
+            <el-button size="small" text type="primary" @click="use(row)">使用</el-button>
+            <el-button size="small" text type="danger" @click="remove(row)">删除</el-button>
+          </div>
         </template>
       </el-table-column>
     </el-table>
@@ -247,6 +249,9 @@ async function submitCreate() {
 </script>
 
 <style scoped>
+.row-ops { display: flex; align-items: center; white-space: nowrap; }
+.row-ops .el-button + .el-button { margin-left: 0; }
+.row-ops .el-button { padding-left: 6px; padding-right: 6px; }
 .notify-grid { display: grid; grid-template-columns: 1fr 1.6fr; gap: 0 14px; }
 .notify-test { display: flex; align-items: center; gap: 10px; margin-top: -6px; }
 .notify-tip { font-size: 12px; color: var(--el-text-color-secondary); }

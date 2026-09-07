@@ -1,12 +1,13 @@
 import time
 
 from fastapi import APIRouter, Depends, Request
+from pydantic import BaseModel
 
 from .. import database as db
 from ..config import settings
-from ..errors import ApiError, JWT_INVALID, LOGIN_FAILED, ok
+from ..errors import ApiError, JWT_INVALID, LOGIN_FAILED, VALIDATION_FAILED, ok
 from ..schemas import LoginReq
-from ..security import create_token, decode_token, verify_password
+from ..security import create_token, decode_token, hash_password, verify_password
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -78,3 +79,23 @@ def login(req: LoginReq, request: Request):
 @router.get("/me")
 def me(user: str = Depends(get_current_user)):
     return ok({"username": user})
+
+
+class ChangePasswordReq(BaseModel):
+    old_password: str
+    new_password: str
+
+
+@router.post("/password")
+def change_password(req: ChangePasswordReq, user: str = Depends(get_current_user)):
+    """修改当前登录用户的密码（校验旧密码）"""
+    if not settings.auth_enabled:
+        raise ApiError(VALIDATION_FAILED, "鉴权已关闭，无需修改密码")
+    row = db.query_one("SELECT * FROM users WHERE username = ?", (user,))
+    if row is None or not verify_password(req.old_password, row["password_hash"]):
+        raise ApiError(LOGIN_FAILED, "当前密码不正确")
+    if len(req.new_password) < 6:
+        raise ApiError(VALIDATION_FAILED, "新密码至少 6 位")
+    db.execute("UPDATE users SET password_hash = ? WHERE username = ?",
+               (hash_password(req.new_password), user))
+    return ok({"changed": True})

@@ -18,6 +18,9 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
+/* 原生控件（select 下拉列表/滚动条等）跟随主题明暗，避免深色主题下露出白底 */
+html.dark { color-scheme: dark; }
+html:not(.dark) { color-scheme: light; }
 
 body {
   background:

@@ -33,6 +33,7 @@
         <el-icon style="margin-right:3px"><FirstAidKit /></el-icon>体检
       </button>
       <ThemeSwitcher />
+      <AccountMenu />
       <span v-if="!llamaOnline" class="badge danger">llama 离线</span>
       <span v-else-if="!sshOk" class="badge warn">SSH 断开</span>
       <span v-else class="badge ok">在线</span>
@@ -58,6 +59,7 @@ import { computed } from 'vue'
 import { fmtTokens, fmtGB, alertLevel } from '../utils'
 import LiveClock from './LiveClock.vue'
 import ThemeSwitcher from './ThemeSwitcher.vue'
+import AccountMenu from './AccountMenu.vue'
 import DiagnosticDialog from './DiagnosticDialog.vue'
 import { ref } from 'vue'
 

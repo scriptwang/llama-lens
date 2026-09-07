@@ -211,7 +211,7 @@ html[data-theme='terminal'] .brandbar .conn { border-radius: 0; }
 html[data-theme='terminal'] .brandbar .clock-sep,
 html[data-theme='terminal'] .topbar .clock-sep { background: var(--term-line); }
 html[data-theme='terminal'] .mode-select {
-  background: var(--card-bg);
+  background: var(--term-inset);
   border-radius: 0;
   font-family: inherit;
 }
@@ -221,7 +221,7 @@ html[data-theme='terminal'] .mode-indicator { border-radius: 0; box-shadow: none
 html[data-theme='terminal'] .theme-switch::before { content: '['; color: var(--text-faint); }
 html[data-theme='terminal'] .theme-switch::after { content: ']'; color: var(--text-faint); }
 html[data-theme='terminal'] .theme-switch select {
-  background: var(--card-bg);
+  background: var(--term-inset);
   border-radius: 0;
   font-family: inherit;
 }
