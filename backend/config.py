@@ -123,6 +123,10 @@ class HostConfig:
     disk_mounts: List[str] = field(default_factory=lambda: ["/"])
     systemd_unit: str = "llama-server.service"
     thresholds: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    # 告警推送（webhook）
+    notify_enabled: bool = False
+    notify_type: str = "wecom"
+    notify_url: str = ""
 
 
 @dataclass

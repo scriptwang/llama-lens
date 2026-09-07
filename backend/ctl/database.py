@@ -100,6 +100,9 @@ _HOSTS_MIGRATIONS = {
     "log_catchup_sec": "ALTER TABLE hosts ADD COLUMN log_catchup_sec INTEGER NOT NULL DEFAULT 30",
     "disk_mounts": "ALTER TABLE hosts ADD COLUMN disk_mounts TEXT NOT NULL DEFAULT '[''/'']'",
     "thresholds": "ALTER TABLE hosts ADD COLUMN thresholds TEXT",
+    "notify_enabled": "ALTER TABLE hosts ADD COLUMN notify_enabled INTEGER NOT NULL DEFAULT 0",
+    "notify_type": "ALTER TABLE hosts ADD COLUMN notify_type TEXT NOT NULL DEFAULT 'wecom'",
+    "notify_url": "ALTER TABLE hosts ADD COLUMN notify_url TEXT NOT NULL DEFAULT ''",
 }
 
 

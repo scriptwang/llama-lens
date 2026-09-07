@@ -39,6 +39,10 @@ class HostConnectReq(BaseModel):
     log_catchup_sec: int = 30
     disk_mounts: Optional[list] = None
     thresholds: Optional[dict] = None
+    # 告警推送
+    notify_enabled: bool = False
+    notify_type: str = "wecom"
+    notify_url: str = ""
 
 
 class HostUpdateReq(BaseModel):
@@ -62,6 +66,10 @@ class HostUpdateReq(BaseModel):
     log_path: Optional[str] = None
     log_follow: Optional[bool] = None
     log_catchup_sec: Optional[int] = None
+    # 告警推送（None = 不修改）
+    notify_enabled: Optional[bool] = None
+    notify_type: Optional[str] = None
+    notify_url: Optional[str] = None
     disk_mounts: Optional[list] = None
     thresholds: Optional[dict] = None
 

@@ -21,7 +21,7 @@ MONITOR_FIELDS = (
     "llama_slow_interval", "llama_timeout", "ssh_interval", "ssh_keepalive",
     "ssh_timeout", "key_path", "process_name", "systemd_unit", "log_source",
     "log_unit", "log_path", "log_follow", "log_catchup_sec", "disk_mounts",
-    "thresholds",
+    "thresholds", "notify_enabled", "notify_type", "notify_url",
 )
 
 
@@ -99,6 +99,9 @@ def row_to_host_config(row, global_thresholds: Optional[dict] = None) -> HostCon
         disk_mounts=list(mounts),
         systemd_unit=row["systemd_unit"] or "llama-server.service",
         thresholds=merge_thresholds(global_thresholds, host_t),
+        notify_enabled=bool(row["notify_enabled"]),
+        notify_type=row["notify_type"] or "wecom",
+        notify_url=row["notify_url"] or "",
     )
 
 

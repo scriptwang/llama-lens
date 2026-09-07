@@ -15,6 +15,7 @@ from collections import deque
 from typing import Any, Dict, List, Optional
 
 from .config import INVERTED_METRICS
+from .notify import NOTIFY_EVENT_TYPES
 
 
 class EventDetector:
@@ -24,6 +25,7 @@ class EventDetector:
     def __init__(self, maxlen: int = 200, sink=None):
         self.events: deque = deque(maxlen=maxlen)
         self._sink = sink  # 可选持久化回调 sink(event_dict)
+        self._notify_sink = None  # 可选推送回调 notify_sink(event_dict)
         self._llama_online: Optional[bool] = None
         self._ssh_connected: Optional[bool] = None
         self._task_running: bool = False
@@ -33,6 +35,10 @@ class EventDetector:
         self._pending_task_end_timer = None
         self._ended_task_ids: deque = deque(maxlen=200)
         self._alert_levels: Dict[str, tuple] = {}
+
+    def set_notify_sink(self, cb) -> None:
+        """设置推送回调（状态变化事件：告警新发/升级/恢复、llama 上下线、SSH 断连）。"""
+        self._notify_sink = cb
 
     # ------------------------------------------------------------------
     def emit(self, ts: Optional[float], level: str, type_: str, msg: str) -> None:
@@ -48,6 +54,11 @@ class EventDetector:
                 self._sink(ev)
             except Exception:
                 pass  # 持久化失败不影响事件检测
+        if self._notify_sink is not None and type_ in NOTIFY_EVENT_TYPES:
+            try:
+                self._notify_sink(ev)
+            except Exception:
+                pass  # 推送失败不影响事件检测
 
     def set_llama_online(self, ts: float, online: bool, model_name: str = "") -> None:
         if self._llama_online is None:

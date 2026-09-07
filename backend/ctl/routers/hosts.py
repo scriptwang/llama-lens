@@ -10,6 +10,7 @@ from .. import database as db
 from ..errors import ApiError, VALIDATION_FAILED, ok, validate_unit_name
 from ..hostsync import MONITOR_FIELDS, apply_monitor, apply_monitor_async, gen_mid
 from .auth import get_current_user
+from ...notify import CHANNELS as NOTIFY_CHANNELS
 from ..schemas import HostConnectReq, HostUpdateReq
 from ..security import decrypt_secret, encrypt_secret
 from ..ssh_pool import pool, run
@@ -60,6 +61,9 @@ def _public(row) -> dict:
         "username": row["username"],
         "auth_type": row["auth_type"],
         "browse_paths": row["browse_paths"] or "",
+        "notify_enabled": bool(row["notify_enabled"]),
+        "notify_type": row["notify_type"] or "wecom",
+        "notify_url": row["notify_url"] or "",
         "created_at": row["created_at"],
         "last_connected_at": row["last_connected_at"],
     }
@@ -93,6 +97,8 @@ def get_host_row(host_id: int):
 def connect(req: HostConnectReq, request: Request, user: str = Depends(get_current_user)):
     if req.auth_type not in ("password", "key"):
         raise ApiError(VALIDATION_FAILED, "auth_type 必须是 password 或 key")
+    if req.notify_type not in NOTIFY_CHANNELS:
+        raise ApiError(VALIDATION_FAILED, "notify_type 必须是 %s 之一" % "/".join(NOTIFY_CHANNELS))
     if req.auth_type == "password" and not req.password:
         raise ApiError(VALIDATION_FAILED, "密码不能为空")
     if req.auth_type == "key" and not req.key_data:
@@ -134,6 +140,7 @@ def connect(req: HostConnectReq, request: Request, user: str = Depends(get_curre
         1 if req.log_follow else 0, req.log_catchup_sec,
         json.dumps(req.disk_mounts) if req.disk_mounts else '["/"]',
         json.dumps(req.thresholds) if req.thresholds else None,
+        1 if req.notify_enabled else 0, req.notify_type or "wecom", req.notify_url or "",
     )
     if existing:
         db.execute(
@@ -143,7 +150,8 @@ def connect(req: HostConnectReq, request: Request, user: str = Depends(get_curre
                llama_slow_interval = ?, llama_timeout = ?, ssh_interval = ?, ssh_keepalive = ?,
                ssh_timeout = ?, key_path = ?, process_name = ?, systemd_unit = ?,
                log_source = ?, log_unit = ?, log_path = ?, log_follow = ?, log_catchup_sec = ?,
-               disk_mounts = ?, thresholds = ? WHERE id = ?""",
+               disk_mounts = ?, thresholds = ?,
+               notify_enabled = ?, notify_type = ?, notify_url = ? WHERE id = ?""",
             (req.alias, enc, req.auth_type, enc_pass, req.browse_paths or "", _now(),
              *mon_vals, existing["id"]),
         )
@@ -159,8 +167,8 @@ def connect(req: HostConnectReq, request: Request, user: str = Depends(get_curre
                llama_slow_interval, llama_timeout, ssh_interval, ssh_keepalive,
                ssh_timeout, key_path, process_name, systemd_unit,
                log_source, log_unit, log_path, log_follow, log_catchup_sec,
-               disk_mounts, thresholds)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               disk_mounts, thresholds, notify_enabled, notify_type, notify_url)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (mid, req.alias, req.host, req.port, req.username, enc, req.auth_type,
              enc_pass, req.browse_paths or "", _now(), *mon_vals),
         )

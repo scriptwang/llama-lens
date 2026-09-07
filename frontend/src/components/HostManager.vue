@@ -37,6 +37,28 @@
         <el-form-item label="文件浏览快捷目录（逗号分隔）">
           <el-input v-model="editForm.browse_paths" placeholder="如 /share,/models；填 / 可浏览全部目录（所有文件选择器都从这里取快捷目录）" />
         </el-form-item>
+        <el-divider content-position="left">告警推送</el-divider>
+        <el-form-item label="启用告警推送（webhook）">
+          <el-switch v-model="editForm.notify_enabled" />
+        </el-form-item>
+        <div v-if="editForm.notify_enabled" class="notify-grid">
+          <el-form-item label="渠道">
+            <el-select v-model="editForm.notify_type" style="width: 100%">
+              <el-option label="企业微信" value="wecom" />
+              <el-option label="钉钉" value="dingtalk" />
+              <el-option label="飞书" value="feishu" />
+              <el-option label="Bark（iOS 推送）" value="bark" />
+              <el-option label="通用 JSON" value="generic" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="Webhook 地址">
+            <el-input v-model="editForm.notify_url" placeholder="如 https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..." />
+          </el-form-item>
+        </div>
+        <div v-if="editForm.notify_enabled && editForm.notify_url.trim()" class="notify-test">
+          <el-button size="small" :loading="testingNotify" @click="testNotify">发送测试消息</el-button>
+          <span class="notify-tip">按当前填写的配置发送（无需先保存）</span>
+        </div>
       </el-form>
       <template #footer>
         <el-button @click="showEdit = false">取消</el-button>
@@ -105,7 +127,7 @@ const hosts = ref([])
 const testingId = ref(0)
 const showEdit = ref(false)
 const savingEdit = ref(false)
-const editForm = reactive({ id: 0, alias: '', browse_paths: '' })
+const editForm = reactive({ id: 0, alias: '', browse_paths: '', notify_enabled: false, notify_type: 'wecom', notify_url: '' })
 const showCreate = ref(false)
 const savingCreate = ref(false)
 const createForm = reactive({
@@ -134,18 +156,41 @@ function openEdit(row) {
   editForm.id = row.db_id
   editForm.alias = row.alias || ''
   editForm.browse_paths = row.browse_paths || ''
+  editForm.notify_enabled = !!row.notify_enabled
+  editForm.notify_type = row.notify_type || 'wecom'
+  editForm.notify_url = row.notify_url || ''
   showEdit.value = true
 }
 
 async function saveEdit() {
   savingEdit.value = true
   try {
-    await http.put(`/hosts/${editForm.id}`, { alias: editForm.alias, browse_paths: editForm.browse_paths })
+    await http.put(`/hosts/${editForm.id}`, {
+      alias: editForm.alias,
+      browse_paths: editForm.browse_paths,
+      notify_enabled: editForm.notify_enabled,
+      notify_type: editForm.notify_type,
+      notify_url: editForm.notify_url.trim(),
+    })
     ElMessage.success('已保存')
     showEdit.value = false
     hosts.value = await store.fetchHosts()
   } finally {
     savingEdit.value = false
+  }
+}
+
+const testingNotify = ref(false)
+async function testNotify() {
+  testingNotify.value = true
+  try {
+    await http.post(`/hosts/${editForm.id}/notify-test`, {
+      notify_type: editForm.notify_type,
+      notify_url: editForm.notify_url.trim(),
+    })
+    ElMessage.success('测试消息已发送，请查看接收端')
+  } finally {
+    testingNotify.value = false
   }
 }
 
@@ -202,6 +247,9 @@ async function submitCreate() {
 </script>
 
 <style scoped>
+.notify-grid { display: grid; grid-template-columns: 1fr 1.6fr; gap: 0 14px; }
+.notify-test { display: flex; align-items: center; gap: 10px; margin-top: -6px; }
+.notify-tip { font-size: 12px; color: var(--el-text-color-secondary); }
 .tip { margin-top: 12px; font-size: 12px; color: var(--lc-text-muted); }
 .toolbar { margin-bottom: 12px; display: flex; justify-content: flex-end; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }

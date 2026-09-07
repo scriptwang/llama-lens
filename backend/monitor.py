@@ -34,6 +34,7 @@ class HostMonitor:
         self.global_cfg = global_cfg
         self.writer = writer
         self.events = EventDetector(sink=self._event_sink)
+        self.events.set_notify_sink(self._notify_sink)
         self.diff = DiffEngine()
         self.ring_llama = RingBuffer(global_cfg.llama_points, sink=self._llama_sink)
         self.ring_host = RingBuffer(global_cfg.host_points, sink=self._host_sink)
@@ -55,6 +56,22 @@ class HostMonitor:
     def _host_sink(self, name: str, ts: float, value) -> None:
         if self.writer is not None:
             self.writer.enqueue_host(self.cfg.id, ts, name, value)
+
+    def _notify_sink(self, ev: Dict[str, Any]) -> None:
+        """状态变化事件 → webhook 推送（未启用/未配置时直接跳过）。"""
+        cfg = self.cfg
+        if not (cfg.notify_enabled and cfg.notify_url):
+            return
+        from .notify import send_async
+        title = {"alert": "阈值告警", "llama_up": "llama 上线", "llama_down": "llama 离线",
+                 "ssh_up": "SSH 重连", "ssh_down": "SSH 断开"}.get(ev.get("type"), ev.get("type", "事件"))
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(send_async(
+                cfg.notify_type, cfg.notify_url, cfg.name,
+                ev.get("level", "info"), title, ev.get("msg", "")))
+        except RuntimeError:
+            pass  # 无事件循环（测试环境）时跳过
 
     def _event_sink(self, ev: Dict[str, Any]) -> None:
         if self.writer is not None:
