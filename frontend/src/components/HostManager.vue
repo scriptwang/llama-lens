@@ -22,7 +22,6 @@
           <div class="row-ops">
             <el-button size="small" text type="primary" :loading="testingId === row.id" @click="test(row)">测试</el-button>
             <el-button size="small" text type="primary" @click="openEdit(row)">编辑</el-button>
-            <el-button size="small" text type="primary" @click="use(row)">使用</el-button>
             <el-button size="small" text type="danger" @click="remove(row)">删除</el-button>
           </div>
         </template>
@@ -33,6 +32,35 @@
 
     <el-dialog v-model="showEdit" title="编辑主机" width="480px" append-to-body :teleported="false">
       <el-form label-position="top">
+        <div class="form-grid">
+          <el-form-item label="主机">
+            <el-input v-model="editForm.host" placeholder="主机名或 IP，如 ai.lan" />
+          </el-form-item>
+          <el-form-item label="端口">
+            <el-input-number v-model="editForm.port" :min="1" :max="65535" style="width: 100%" />
+          </el-form-item>
+        </div>
+        <el-form-item label="用户名">
+          <el-input v-model="editForm.username" placeholder="root" />
+        </el-form-item>
+        <el-form-item label="认证方式">
+          <el-radio-group v-model="editForm.auth_type">
+            <el-radio-button value="password">密码</el-radio-button>
+            <el-radio-button value="key">私钥</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="editForm.auth_type === 'password'" label="密码（留空则不修改）">
+          <el-input v-model="editForm.password" type="password" show-password placeholder="留空保持原密码" />
+        </el-form-item>
+        <template v-else>
+          <el-form-item label="私钥（留空则不修改）">
+            <el-input v-model="editForm.key_data" type="textarea" :rows="3" placeholder="留空保持原私钥" />
+          </el-form-item>
+          <el-form-item label="密钥口令（留空则不修改）">
+            <el-input v-model="editForm.key_passphrase" type="password" show-password placeholder="可选" />
+          </el-form-item>
+        </template>
+        <el-divider content-position="left">其他</el-divider>
         <el-form-item label="别名">
           <el-input v-model="editForm.alias" placeholder="可选" />
         </el-form-item>
@@ -129,7 +157,7 @@ const hosts = ref([])
 const testingId = ref(0)
 const showEdit = ref(false)
 const savingEdit = ref(false)
-const editForm = reactive({ id: 0, alias: '', browse_paths: '', notify_enabled: false, notify_type: 'wecom', notify_url: '' })
+const editForm = reactive({ id: 0, host: '', port: 22, username: '', auth_type: 'password', password: '', key_data: '', key_passphrase: '', alias: '', browse_paths: '', notify_enabled: false, notify_type: 'wecom', notify_url: '' })
 const showCreate = ref(false)
 const savingCreate = ref(false)
 const createForm = reactive({
@@ -156,6 +184,13 @@ async function test(row) {
 
 function openEdit(row) {
   editForm.id = row.db_id
+  editForm.host = row.host || ''
+  editForm.port = row.port || 22
+  editForm.username = row.username || ''
+  editForm.auth_type = row.auth_type || 'password'
+  editForm.password = ''
+  editForm.key_data = ''
+  editForm.key_passphrase = ''
   editForm.alias = row.alias || ''
   editForm.browse_paths = row.browse_paths || ''
   editForm.notify_enabled = !!row.notify_enabled
@@ -168,6 +203,13 @@ async function saveEdit() {
   savingEdit.value = true
   try {
     await http.put(`/hosts/${editForm.id}`, {
+      host: editForm.host.trim(),
+      port: editForm.port,
+      username: editForm.username.trim(),
+      auth_type: editForm.auth_type,
+      password: editForm.password || null,
+      key_data: editForm.key_data || null,
+      key_passphrase: editForm.key_passphrase || null,
       alias: editForm.alias,
       browse_paths: editForm.browse_paths,
       notify_enabled: editForm.notify_enabled,
@@ -195,13 +237,6 @@ async function testNotify() {
     testingNotify.value = false
   }
 }
-
-function use(row) {
-  store.setCurrentHost(row.db_id)
-  emit('update:modelValue', false)
-  emit('changed')
-}
-
 async function remove(row) {
   await ElMessageBox.confirm(`确定删除主机 ${row.alias || row.host} 吗？`, '删除确认', { type: 'warning' })
   await http.delete(`/hosts/${row.db_id}`)

@@ -273,6 +273,24 @@ async def update_host(host_id: int, req: HostUpdateReq, request: Request, user: 
     if req.browse_paths is not None:
         fields.append("browse_paths = ?")
         params.append(req.browse_paths)
+    # 连接信息（主机/端口/用户名/认证/凭证）；凭证仅当提供非空时更新（重新加密）
+    conn_changed = False
+    if req.host is not None and req.host.strip():
+        fields.append("host = ?"); params.append(req.host.strip()); conn_changed = True
+    if req.port is not None:
+        fields.append("port = ?"); params.append(int(req.port)); conn_changed = True
+    if req.username is not None and req.username.strip():
+        fields.append("username = ?"); params.append(req.username.strip()); conn_changed = True
+    eff_auth = req.auth_type if req.auth_type in ("password", "key") else row0["auth_type"]
+    if req.auth_type is not None and req.auth_type in ("password", "key"):
+        fields.append("auth_type = ?"); params.append(req.auth_type); conn_changed = True
+    if eff_auth == "key":
+        if req.key_data:
+            fields.append("encrypted_pwd = ?"); params.append(encrypt_secret(req.key_data)); conn_changed = True
+        if req.key_passphrase:
+            fields.append("key_passphrase_enc = ?"); params.append(encrypt_secret(req.key_passphrase)); conn_changed = True
+    elif req.password:
+        fields.append("encrypted_pwd = ?"); params.append(encrypt_secret(req.password)); conn_changed = True
     mon_changed = False
     for f in MONITOR_FIELDS:
         v = getattr(req, f)
@@ -288,6 +306,9 @@ async def update_host(host_id: int, req: HostUpdateReq, request: Request, user: 
     if fields:
         params.append(host_id)
         db.execute(f"UPDATE hosts SET {', '.join(fields)} WHERE id = ?", tuple(params))
+    if conn_changed:
+        pool.close_host(host_id)  # 连接信息变更：失效管理侧连接池缓存
+        mon_changed = True        # 触发监控重启（主机/凭证可能变化）
     db.log_action(host_id, user, "update_host", "", "更新主机配置", request.client.host if request.client else "")
     if mon_changed:
         row = db.query_one("SELECT * FROM hosts WHERE id = ?", (host_id,))

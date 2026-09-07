@@ -63,14 +63,14 @@
               <div class="dg-bar"><i :class="barLevel(data.system.cpu_pct)" :style="{ width: (data.system.cpu_pct || 0) + '%' }"></i></div>
             </div>
             <div class="dg-metric">
-              <div class="dg-metric-head"><span>内存</span><b>{{ data.system.mem_used_gib != null ? data.system.mem_used_gib + ' / ' + data.system.mem_total_gib + ' GiB' : '—' }}（{{ pct(data.system.mem_pct) }}）</b></div>
+              <div class="dg-metric-head"><span>内存</span><b>{{ data.system.mem_used_gib != null ? fmtGb(data.system.mem_used_gib) + ' / ' + fmtGb(data.system.mem_total_gib) + ' GiB' : '—' }}（{{ pct(data.system.mem_pct) }}）</b></div>
               <div class="dg-bar"><i :class="barLevel(data.system.mem_pct)" :style="{ width: (data.system.mem_pct || 0) + '%' }"></i></div>
             </div>
             <div class="dg-metric">
               <div class="dg-metric-head"><span>负载</span><b>{{ (data.system.load.length ? data.system.load.map((x) => x.toFixed(2)).join(' / ') : '— / — / —') }}</b></div>
             </div>
             <div v-for="(d, i) in data.system.disks" :key="i" class="dg-metric">
-              <div class="dg-metric-head"><span>磁盘 {{ d.mount }}</span><b>{{ d.used_gb }} / {{ d.size_gb }} GiB（{{ pct(d.use_pct) }}）</b></div>
+              <div class="dg-metric-head"><span>磁盘 {{ d.mount }}</span><b>{{ fmtGb(d.used_gb) }} / {{ fmtGb(d.size_gb) }} GiB（{{ pct(d.use_pct) }}）</b></div>
               <div class="dg-bar"><i :class="barLevel(d.use_pct)" :style="{ width: (d.use_pct || 0) + '%' }"></i></div>
             </div>
             <div class="dg-metric">
@@ -101,11 +101,19 @@
           <div class="dg-card">
             <div class="dg-card-title"><el-icon><Platform /></el-icon>服务（{{ data.services.length }}）</div>
             <div v-if="!data.services.length" class="dg-none">未扫描到服务</div>
-            <div v-for="s in data.services" :key="s.name" class="dg-svc">
-              <span class="dot" :class="s.active_state === 'active' ? 'ok' : (s.active_state === 'failed' ? 'bad' : 'off')"></span>
-              <span class="name">{{ s.name }}</span>
-              <span class="dim">{{ s.active_state }}（{{ s.sub_state }}）</span>
-              <span class="dim">自启 {{ s.unit_file_state }}</span>
+            <div class="dg-svc-table">
+              <div class="dg-svc-row head">
+                <span class="c-dot"></span>
+                <span class="c-name">服务</span>
+                <span class="c-state">状态</span>
+                <span class="c-boot">自启</span>
+              </div>
+              <div v-for="s in data.services" :key="s.name" class="dg-svc-row">
+                <span class="c-dot"><span class="dot" :class="s.active_state === 'active' ? 'ok' : (s.active_state === 'failed' ? 'bad' : 'off')"></span></span>
+                <span class="c-name" :title="s.name">{{ s.name }}</span>
+                <span class="c-state dim">{{ s.active_state }}（{{ s.sub_state }}）</span>
+                <span class="c-boot dim">{{ s.unit_file_state }}</span>
+              </div>
             </div>
           </div>
 
@@ -171,6 +179,9 @@ const data = ref(null)
 
 function pct(v) {
   return v == null ? '—' : Math.round(v) + '%'
+}
+function fmtGb(v) {
+  return v == null ? '—' : v.toFixed(1)
 }
 function barLevel(v) {
   if (v == null) return ''
@@ -327,21 +338,24 @@ function downloadMd() {
 }
 .dg-gpu-meta b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 /* 服务 */
-.dg-svc {
-  display: flex;
+.dg-svc-table { display: flex; flex-direction: column; }
+.dg-svc-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 132px 64px;
   align-items: center;
   gap: 8px;
-  font-size: 12.5px;
+  font-size: 12px;
   padding: 5px 0;
   border-bottom: 1px dashed color-mix(in srgb, var(--text) 8%, transparent);
 }
-.dg-svc:last-child { border-bottom: none; }
-.dg-svc .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-.dg-svc .dot.ok { background: var(--green); }
-.dg-svc .dot.bad { background: var(--red); }
-.dg-svc .dot.off { background: var(--text-faint); }
-.dg-svc .name { font-weight: 600; color: var(--text); font-family: var(--font-mono, monospace); font-size: 12px; }
-.dg-svc .dim { color: var(--text-dim); font-size: 11.5px; }
+.dg-svc-row:last-child { border-bottom: none; }
+.dg-svc-row.head { color: var(--text-faint); font-size: 11px; border-bottom: 1px solid var(--card-border); }
+.dg-svc-row .dot { width: 8px; height: 8px; border-radius: 50%; }
+.dg-svc-row .dot.ok { background: var(--green); }
+.dg-svc-row .dot.bad { background: var(--red); }
+.dg-svc-row .dot.off { background: var(--text-faint); }
+.dg-svc-row .c-name { font-weight: 600; color: var(--text); font-family: var(--font-mono, monospace); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dg-svc-row .dim { color: var(--text-dim); font-size: 11.5px; }
 /* 事件 */
 .dg-evs { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; }
 .dg-ev { display: flex; gap: 8px; font-size: 11.5px; align-items: baseline; }

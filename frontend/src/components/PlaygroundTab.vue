@@ -19,7 +19,7 @@
         输入消息开始推理测试——流式回复，自动统计 TTFT / tokens/s / 总耗时；支持图片（需模型带 mmproj）
       </div>
       <div v-for="(m, i) in chat" :key="i" class="pg-msg" :class="m.role">
-        <div class="pg-role">{{ m.role === 'user' ? '你' : '助手' }}</div>
+        <div class="pg-role">{{ m.role === 'user' ? '你' : modelFileName }}</div>
         <div class="pg-content" :class="{ 'is-md': m.role === 'assistant' }">
           <template v-if="m.images && m.images.length">
             <img v-for="(src, j) in m.images" :key="j" :src="src" class="pg-img" />
@@ -32,7 +32,7 @@
               <span class="pg-reasoning-toggle">{{ isReasoningOpen(i) ? '收起' : '展开' }}</span>
             </div>
             <div v-show="isReasoningOpen(i)" class="pg-reasoning-body">
-              {{ m.reasoning }}<span v-if="streaming && i === chat.length - 1 && !m.content" class="pg-cursor">▍</span>
+              <span class="pg-md" v-html="reasoningHtml(m, i)"></span>
             </div>
           </div>
           <span v-if="m.role === 'assistant' && m.content" class="pg-md" v-html="asstHtml(m, i)"></span>
@@ -147,6 +147,12 @@ const props = defineProps({
 })
 
 const info = ref({ endpoint: '', model: '', online: false })
+// 助手标签：显示模型文件名（路径取最后一段），无模型时回退「助手」
+const modelFileName = computed(() => {
+  const m = info.value.model || ''
+  if (!m) return '助手'
+  return m.split('/').pop()
+})
 const chat = ref([])
 const input = ref('')
 const streaming = ref(false)
@@ -426,6 +432,12 @@ function asstHtml(m, i) {
   if (streaming.value && i === chat.value.length - 1) html += '<span class="pg-cursor">▍</span>'
   return html
 }
+// 思考过程：Markdown 渲染；流式且尚未出正文时末尾光标
+function reasoningHtml(m, i) {
+  let html = renderMd(m.reasoning)
+  if (streaming.value && i === chat.value.length - 1 && !m.content) html += '<span class="pg-cursor">▍</span>'
+  return html
+}
 
 // 消息 → OpenAI 格式（带图片时 content 为多模态数组）
 function toApiMessages() {
@@ -637,7 +649,6 @@ onMounted(() => {
   font-size: 12px;
   line-height: 1.6;
   color: var(--text-dim);
-  white-space: pre-wrap;
   word-break: break-word;
   border-top: 1px dashed var(--card-border);
 }
@@ -699,7 +710,7 @@ onMounted(() => {
 .pg-row { display: flex; gap: 10px; align-items: flex-end; }
 .pg-row :deep(.el-textarea__inner) { min-height: 84px; max-height: 320px; }
 .pg-btns { display: flex; flex-direction: column; gap: 8px; flex: none; }
-.pg-attach { width: 42px; }
+.pg-btns .el-button { width: 60px; }
 .pg-row .pg-btns .el-button:last-child { height: 42px; }
 .pg-file { display: none; }
 /* 会话行 */

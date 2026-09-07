@@ -7,7 +7,7 @@ import 'element-plus/theme-chalk/dark/css-vars.css'
 import {
   ArrowLeft, ArrowRight, ArrowUp, Back, Brush, CaretRight, Clock, Close, CopyDocument, Cpu, DataLine,
   Delete, Document, EditPen, FirstAidKit, Folder, FolderOpened, Grid, Lightning, Monitor, Moon,
-  Odometer, Operation, Picture, Platform, Plus, Refresh, RefreshRight, Search, Setting, Sunny,
+  HotWater, Odometer, Operation, Picture, Platform, Plus, Refresh, RefreshRight, Search, Setting, Sunny,
   SwitchButton, Timer, VideoPause, VideoPlay, Warning,
 } from '@element-plus/icons-vue'
 import App from './App.vue'
@@ -33,7 +33,7 @@ app.directive('loading', ElLoading.directive)
 const icons = {
   ArrowLeft, ArrowRight, ArrowUp, Back, Brush, CaretRight, Clock, Close, CopyDocument, Cpu, DataLine,
   Delete, Document, EditPen, FirstAidKit, Folder, FolderOpened, Grid, Lightning, Monitor, Moon,
-  Odometer, Operation, Picture, Platform, Plus, Refresh, RefreshRight, Search, Setting, Sunny,
+  HotWater, Odometer, Operation, Picture, Platform, Plus, Refresh, RefreshRight, Search, Setting, Sunny,
   SwitchButton, Timer, VideoPause, VideoPlay, Warning,
 }
 for (const [name, comp] of Object.entries(icons)) app.component(name, comp)

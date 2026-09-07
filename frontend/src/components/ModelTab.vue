@@ -26,9 +26,9 @@
       <el-input v-model="draft.path" size="small" class="mt-in" placeholder="路径关键词" clearable @keyup.enter="applySearch" />
       <span class="mt-filter-label">大小 GB</span>
       <div class="mt-size">
-        <el-input-number v-model="draft.minGb" size="small" :min="0" :max="2048" :step="1" :precision="1" :controls="false" placeholder="最小" class="mt-num" />
+        <el-input-number v-model="draft.minGb" size="small" :min="0" :max="2048" :step="1" :precision="1" controls-position="right" placeholder="最小" class="mt-num" />
         <span class="mt-dash">—</span>
-        <el-input-number v-model="draft.maxGb" size="small" :min="0" :max="4096" :step="1" :precision="1" :controls="false" placeholder="最大" class="mt-num" />
+        <el-input-number v-model="draft.maxGb" size="small" :min="0" :max="4096" :step="1" :precision="1" controls-position="right" placeholder="最大" class="mt-num" />
       </div>
       <el-select v-model="draft.days" size="small" class="mt-days">
         <el-option label="全部时间" :value="0" />

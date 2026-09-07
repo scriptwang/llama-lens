@@ -48,6 +48,14 @@ class HostConnectReq(BaseModel):
 class HostUpdateReq(BaseModel):
     alias: Optional[str] = None
     browse_paths: Optional[str] = None
+    # 连接信息（None = 不修改；password/key_data 传空 = 不修改凭证）
+    host: Optional[str] = None
+    port: Optional[int] = None
+    username: Optional[str] = None
+    auth_type: Optional[str] = None
+    password: Optional[str] = None
+    key_data: Optional[str] = None
+    key_passphrase: Optional[str] = None
     # 监控配置（None = 不修改）
     monitor_enabled: Optional[bool] = None
     llama_host: Optional[str] = None

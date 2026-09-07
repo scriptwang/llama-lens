@@ -27,16 +27,16 @@
     </div>
 
     <div class="svc-actions">
-      <el-button size="small" type="success" :disabled="isActive" @click="$emit('action', service, 'start')">
+      <el-button size="small" type="success" :disabled="isActive" :loading="actionLoading === 'start'" @click="$emit('action', service, 'start')">
         <el-icon style="margin-right:3px"><VideoPlay /></el-icon>启动
       </el-button>
-      <el-button size="small" type="danger" :disabled="!isActive" @click="$emit('action', service, 'stop')">
+      <el-button size="small" type="danger" :disabled="!isActive" :loading="actionLoading === 'stop'" @click="$emit('action', service, 'stop')">
         <el-icon style="margin-right:3px"><VideoPause /></el-icon>停止
       </el-button>
-      <el-button size="small" type="warning" @click="$emit('action', service, 'restart')">
+      <el-button size="small" type="warning" :loading="actionLoading === 'restart'" @click="$emit('action', service, 'restart')">
         <el-icon style="margin-right:3px"><RefreshRight /></el-icon>重启
       </el-button>
-      <el-button size="small" @click="$emit('action', service, 'refresh')">
+      <el-button size="small" :loading="actionLoading === 'refresh'" @click="$emit('action', service, 'refresh')">
         <el-icon style="margin-right:3px"><Refresh /></el-icon>刷新
       </el-button>
     </div>
@@ -63,6 +63,7 @@ import { computed } from 'vue'
 const props = defineProps({
   service: Object,
   metrics: { type: Object, default: null },
+  actionLoading: { type: String, default: '' },  // 当前进行中的动作（start/stop/restart/refresh）
 })
 defineEmits(['action', 'edit', 'restore', 'logs', 'duplicate'])
 

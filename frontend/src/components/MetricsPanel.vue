@@ -253,7 +253,7 @@ const cards = computed(() => {
     },
     {
       key: 'temp',
-      icon: 'Thermometer',
+      icon: 'HotWater',
       label: '温度',
       value: tempAvg != null ? Math.round(tempAvg) : null,
       unit: '°C',

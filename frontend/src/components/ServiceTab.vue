@@ -37,6 +37,7 @@
         <ServiceCard
           :service="s"
           :metrics="ctlMetrics ? ctlMetrics.services : null"
+          :action-loading="ctlActionLoading[s.name] || ''"
           @action="onCtlAction"
           @edit="openCtlConfig"
           @restore="onCtlRestore"
@@ -85,13 +86,16 @@ const ctlFilterStatus = ref('all')
 const ctlFilterEnabled = ref('all')
 const ctlFilteredServices = computed(() => {
   const kw = ctlFilterKeyword.value.trim().toLowerCase()
-  return ctlServices.value.filter((s) => {
+  const list = ctlServices.value.filter((s) => {
     if (kw && !s.name.toLowerCase().includes(kw)) return false
     if (ctlFilterStatus.value !== 'all' && s.active_state !== ctlFilterStatus.value) return false
     if (ctlFilterEnabled.value === 'enabled' && s.unit_file_state !== 'enabled') return false
     if (ctlFilterEnabled.value === 'disabled' && s.unit_file_state === 'enabled') return false
     return true
   })
+  // 运行中的永远排在最前，其次异常，其余按名称
+  const rank = (s) => (s.active_state === 'active' ? 0 : s.active_state === 'failed' ? 1 : 2)
+  return list.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name))
 })
 const ctlHasFilter = computed(
   () => !!(ctlFilterKeyword.value.trim() || ctlFilterStatus.value !== 'all' || ctlFilterEnabled.value !== 'all'),
@@ -104,6 +108,7 @@ function clearCtlFilters() {
 const ctlMetrics = ref(null)
 const ctlMetricsError = ref('')
 const ctlScanning = ref(false)
+const ctlActionLoading = ref({})  // { [service.name]: 'start'|'stop'|'restart'|'refresh' }
 const ctlConfigVisible = ref(false)
 const newServiceVisible = ref(false)
 const ctlDupVisible = ref(false)
@@ -143,11 +148,15 @@ async function ctlPollMetrics() {
 }
 
 async function onCtlAction(service, action) {
+  ctlActionLoading.value[service.name] = action
   try {
     await http.post(`/services/${encodeURIComponent(service.name)}/${action}`, null,
       { params: { host_id: ctlDbId.value } })
     ctlPollMetrics()
   } catch (e) { /* client 已提示 */ }
+  finally {
+    delete ctlActionLoading.value[service.name]
+  }
 }
 
 function openCtlConfig(service) {

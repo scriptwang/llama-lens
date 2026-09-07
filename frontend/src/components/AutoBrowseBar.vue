@@ -35,9 +35,9 @@ const props = defineProps({
   defaultEnabled: { type: Boolean, default: false }, // config.yaml ui.auto_browse.enabled 默认开关
 })
 
-const STORE_KEY = 'llamalens.autobrowse.v2'  // v2：auto_browse 默认值改为可配置后重置本地设置
+const STORE_KEY = 'llamalens.autobrowse.v3'  // v3：默认模式改为轮播，重置旧本地设置
 const enabled = ref(false)
-const mode = ref('scroll')        // scroll=自动滑动 | carousel=轮播
+const mode = ref('carousel')      // scroll=自动滑动 | carousel=轮播（默认轮播）
 const speed = ref(80)             // 自动滑动速度 px/s
 const interval = ref(8)           // 轮播时长 秒/屏
 const paused = ref(false)
