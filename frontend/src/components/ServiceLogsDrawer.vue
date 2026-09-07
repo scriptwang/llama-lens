@@ -113,8 +113,8 @@ onBeforeUnmount(stopTimer)
   margin: 0; padding: 12px 14px;
   height: calc(100% - 52px);
   overflow: auto;
-  background: #0d1117;
-  color: #c9d1d9;
+  background: var(--lc-bg);
+  color: var(--lc-text);
   border-radius: 10px;
   border: 1px solid var(--lc-border);
   font-family: ui-monospace, Menlo, Consolas, monospace;

@@ -1,41 +1,30 @@
+/* 管理区（LlamaCtl 能力）配色映射层：
+   --lc-* 全部映射到全局主题变量（--bg/--card-bg/--text/--cyan 等），
+   9 套主题（aurora/terminal/light/monokai/nord/dracula/synthwave/tokyonight/matrix）自动适配，
+   明暗由主题系统同步的 html.dark 类驱动 Element Plus 暗色变量。 */
 :root {
-  --lc-bg: #eef1f6;
-  --lc-bg-gradient: radial-gradient(1200px 600px at 80% -10%, #dbe4ff 0%, transparent 60%),
-    radial-gradient(900px 500px at -10% 110%, #d8f3ff 0%, transparent 55%), #eef1f6;
-  --lc-surface: rgba(255, 255, 255, 0.82);
-  --lc-surface-solid: #ffffff;
-  --lc-ctrl-bg: rgba(255, 255, 255, 0.66);
-  --lc-border: rgba(15, 23, 42, 0.08);
-  --lc-border-strong: rgba(15, 23, 42, 0.14);
-  --lc-text: #1a2233;
-  --lc-text-secondary: #5b6472;
-  --lc-text-muted: #8a93a3;
-  --lc-primary: #4f6ef7;
-  --lc-primary-2: #7c5cf0;
-  --lc-gradient: linear-gradient(135deg, #4f6ef7 0%, #7c5cf0 100%);
-  --lc-success: #16a34a;
-  --lc-danger: #ef4444;
-  --lc-warning: #f59e0b;
-  --lc-info: #64748b;
+  --lc-bg: var(--bg);
+  --lc-bg-gradient: radial-gradient(1200px 600px at 80% -10%, var(--bg-grad) 0%, transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, var(--bg-grad) 0%, transparent 55%), var(--bg);
+  --lc-surface: var(--card-bg);
+  --lc-surface-solid: var(--bg-grad);
+  --lc-ctrl-bg: var(--card-bg);
+  --lc-border: var(--card-border);
+  --lc-border-strong: var(--card-border-hover);
+  --lc-text: var(--text);
+  --lc-text-secondary: var(--text-dim);
+  --lc-text-muted: var(--text-faint);
+  --lc-primary: var(--cyan);
+  --lc-primary-2: var(--green);
+  --lc-gradient: linear-gradient(135deg, var(--cyan) 0%, var(--green) 100%);
+  --lc-success: var(--green);
+  --lc-danger: var(--red);
+  --lc-warning: var(--amber);
+  --lc-info: var(--text-dim);
   --lc-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.06);
   --lc-shadow-hover: 0 4px 12px rgba(15, 23, 42, 0.08), 0 16px 40px rgba(15, 23, 42, 0.12);
   --lc-glass-blur: blur(14px) saturate(160%);
   --lc-radius: 14px;
-}
-html.dark {
-  --lc-bg: #0b0f17;
-  --lc-bg-gradient: radial-gradient(1100px 560px at 85% -10%, rgba(79, 110, 247, 0.16) 0%, transparent 60%),
-    radial-gradient(900px 520px at -10% 110%, rgba(124, 92, 240, 0.12) 0%, transparent 55%), #0b0f17;
-  --lc-surface: rgba(19, 25, 38, 0.72);
-  --lc-surface-solid: #131926;
-  --lc-ctrl-bg: rgba(7, 11, 19, 0.55);
-  --lc-border: rgba(148, 163, 184, 0.12);
-  --lc-border-strong: rgba(148, 163, 184, 0.22);
-  --lc-text: #e6ebf4;
-  --lc-text-secondary: #9aa5b8;
-  --lc-text-muted: #64708a;
-  --lc-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 28px rgba(0, 0, 0, 0.35);
-  --lc-shadow-hover: 0 6px 18px rgba(0, 0, 0, 0.45), 0 20px 48px rgba(0, 0, 0, 0.5);
 }
 *::-webkit-scrollbar { width: 9px; height: 9px; }
 *::-webkit-scrollbar-track { background: transparent; }
@@ -60,9 +49,9 @@ html.dark {
   --el-button-hover-bg-color: transparent;
   --el-button-hover-border-color: transparent;
   --el-button-hover-text-color: #fff;
-  box-shadow: 0 2px 10px rgba(79, 110, 247, 0.35);
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--lc-primary) 35%, transparent);
 }
-.el-button--primary:hover { box-shadow: 0 4px 16px rgba(79, 110, 247, 0.5); transform: translateY(-1px); }
+.el-button--primary:hover { box-shadow: 0 4px 16px color-mix(in srgb, var(--lc-primary) 50%, transparent); transform: translateY(-1px); }
 .el-button { transition: all 0.18s ease; }
 .el-dialog {
   --el-dialog-bg-color: var(--lc-surface-solid);
@@ -82,7 +71,7 @@ html.dark {
 }
 .el-table { --el-table-bg-color: transparent; --el-table-tr-bg-color: transparent; --el-table-header-bg-color: transparent; }
 .el-table th.el-table__cell { background: var(--lc-surface) !important; }
-.el-table--enable-row-hover .el-table__body tr:hover > td { background: rgba(79, 110, 247, 0.06) !important; }
+.el-table--enable-row-hover .el-table__body tr:hover > td { background: color-mix(in srgb, var(--lc-primary) 6%, transparent) !important; }
 .el-message-box { --el-messagebox-bg-color: var(--lc-surface-solid); border-radius: 14px; border: 1px solid var(--lc-border); }
 .el-overlay { background: rgba(8, 10, 18, 0.55) !important; backdrop-filter: blur(2px); }
 .ctl-scope .glass {
@@ -102,14 +91,14 @@ html.dark {
   display: inline-block; flex-shrink: 0;
   position: relative;
 }
-.ctl-scope .status-dot.active { background: var(--lc-success); box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.5); animation: lc-pulse 2s infinite; }
-.ctl-scope .status-dot.failed { background: var(--lc-danger); box-shadow: 0 0 8px rgba(239, 68, 68, 0.6); }
+.ctl-scope .status-dot.active { background: var(--lc-success); box-shadow: 0 0 0 0 color-mix(in srgb, var(--lc-success) 50%, transparent); animation: lc-pulse 2s infinite; }
+.ctl-scope .status-dot.failed { background: var(--lc-danger); box-shadow: 0 0 8px color-mix(in srgb, var(--lc-danger) 60%, transparent); }
 .ctl-scope .status-dot.inactive { background: var(--lc-text-muted); }
 .ctl-scope .status-dot.other { background: var(--lc-warning); }
 @keyframes lc-pulse {
-  0% { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.45); }
-  70% { box-shadow: 0 0 0 7px rgba(22, 163, 74, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0); }
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--lc-success) 45%, transparent); }
+  70% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--lc-success) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--lc-success) 0%, transparent); }
 }
 .ctl-scope .login-bg {
   position: fixed; inset: 0; z-index: 0; overflow: hidden;
@@ -120,9 +109,9 @@ html.dark {
   animation: lc-float 14s ease-in-out infinite alternate;
 }
 .ctl-scope .login-orb { opacity: 0.35; }
-.ctl-scope .orb-1 { width: 480px; height: 480px; background: #4f6ef7; top: -140px; right: -80px; }
-.ctl-scope .orb-2 { width: 420px; height: 420px; background: #7c5cf0; bottom: -160px; left: -100px; animation-delay: -5s; }
-.ctl-scope .orb-3 { width: 300px; height: 300px; background: #0ea5e9; top: 40%; left: 55%; animation-delay: -9s; opacity: 0.25; }
+.ctl-scope .orb-1 { width: 480px; height: 480px; background: var(--lc-primary); top: -140px; right: -80px; }
+.ctl-scope .orb-2 { width: 420px; height: 420px; background: var(--lc-primary-2); bottom: -160px; left: -100px; animation-delay: -5s; }
+.ctl-scope .orb-3 { width: 300px; height: 300px; background: var(--cyan); top: 40%; left: 55%; animation-delay: -9s; opacity: 0.25; }
 @keyframes lc-float {
   from { transform: translate(0, 0) scale(1); }
   to { transform: translate(-40px, 50px) scale(1.12); }
@@ -152,7 +141,7 @@ html.dark {
   background: var(--lc-gradient);
   display: flex; align-items: center; justify-content: center;
   font-size: 30px;
-  box-shadow: 0 8px 24px rgba(79, 110, 247, 0.4);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--lc-primary) 40%, transparent);
   margin-bottom: 16px;
 }
 .ctl-scope .login-title h1 { margin: 0 0 6px; font-size: 24px; font-weight: 700; letter-spacing: 0.3px; }
@@ -173,7 +162,7 @@ html.dark {
   background: var(--lc-gradient);
   display: flex; align-items: center; justify-content: center;
   font-size: 17px;
-  box-shadow: 0 4px 12px rgba(79, 110, 247, 0.35);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--lc-primary) 35%, transparent);
 }
 .ctl-scope .icon-btn {
   width: 34px; height: 34px; border-radius: 9px;
@@ -182,7 +171,7 @@ html.dark {
   border: 1px solid transparent; background: transparent;
   transition: all 0.18s ease;
 }
-.ctl-scope .icon-btn:hover { background: rgba(79, 110, 247, 0.1); color: var(--lc-primary); border-color: var(--lc-border); }
+.ctl-scope .icon-btn:hover { background: color-mix(in srgb, var(--lc-primary) 10%, transparent); color: var(--lc-primary); border-color: var(--lc-border); }
 .ctl-scope .svc-card {
   margin-bottom: 16px;
   border-radius: var(--lc-radius);
@@ -204,8 +193,8 @@ html.dark {
   background: var(--lc-border-strong);
   transition: background 0.2s ease;
 }
-.ctl-scope .svc-card.is-active::before { background: linear-gradient(180deg, #22c55e, #16a34a); }
-.ctl-scope .svc-card.is-failed::before { background: linear-gradient(180deg, #f87171, #ef4444); }
+.ctl-scope .svc-card.is-active::before { background: var(--lc-success); }
+.ctl-scope .svc-card.is-failed::before { background: var(--lc-danger); }
 .ctl-scope .svc-card:hover {
   transform: translateY(-3px);
   box-shadow: var(--lc-shadow-hover);
@@ -244,8 +233,8 @@ html.dark {
   display: flex; flex-wrap: wrap; gap: 6px 14px;
   margin-bottom: 12px; padding: 7px 10px;
   border-radius: 8px;
-  background: rgba(34, 197, 94, 0.07);
-  border: 1px solid rgba(34, 197, 94, 0.18);
+  background: color-mix(in srgb, var(--lc-success) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--lc-success) 18%, transparent);
   font-size: 11.5px; color: var(--lc-text-secondary);
   font-variant-numeric: tabular-nums;
 }
@@ -270,8 +259,8 @@ html.dark {
 .ctl-scope .editor-toolbar .file-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--lc-primary); }
 .ctl-scope .editor-body { height: calc(100vh - 330px); min-height: 340px; }
 .ctl-scope .param-row { border-radius: 8px; }
-.ctl-scope .param-row:hover { background: rgba(79, 110, 247, 0.07); }
-.ctl-scope .param-row.highlighted { border-color: var(--lc-warning); background: rgba(245, 158, 11, 0.1); }
+.ctl-scope .param-row:hover { background: color-mix(in srgb, var(--lc-primary) 7%, transparent); }
+.ctl-scope .param-row.highlighted { border-color: var(--lc-warning); background: color-mix(in srgb, var(--lc-warning) 10%, transparent); }
 .ctl-scope .desc, .ctl-scope .unknown-tag { color: var(--lc-text-muted); }
 .ctl-scope .unknown-tag { color: var(--lc-warning); }
 .ctl-scope .flag { color: var(--lc-text); }
@@ -283,8 +272,8 @@ html.dark {
 }
 .ctl-scope .hd-head { border-bottom: 1px solid var(--lc-border); color: var(--lc-text); }
 .ctl-scope .hd-entry { border-radius: 8px; }
-.ctl-scope .hd-entry.active { border-color: var(--lc-warning); background: rgba(245, 158, 11, 0.1); }
-.ctl-scope .hd-entry.flash { background: rgba(245, 158, 11, 0.22); transition: background 0.3s; }
+.ctl-scope .hd-entry.active { border-color: var(--lc-warning); background: color-mix(in srgb, var(--lc-warning) 10%, transparent); }
+.ctl-scope .hd-entry.flash { background: color-mix(in srgb, var(--lc-warning) 22%, transparent); transition: background 0.3s; }
 .ctl-scope .hd-flag { color: var(--lc-text); }
 .ctl-scope .hd-alias, .ctl-scope .hd-meta, .ctl-scope .hd-desc { color: var(--lc-text-muted); }
 .ctl-scope .preview-box {
@@ -305,4 +294,3 @@ html.dark {
 .ctl-scope .scan-box { height: 240px; }
 @media (max-width: 900px) {.ctl-scope .topbar { flex-wrap: wrap; height: auto; padding: 10px 14px; }
 }
-

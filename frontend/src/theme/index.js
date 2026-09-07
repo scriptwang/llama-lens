@@ -17,6 +17,18 @@ export const THEMES = [
 
 const STORAGE_KEY = 'llamalens.theme'
 
+// 深色主题集合：同步 html.dark 类（Element Plus 暗色变量与管理区暗色样式依赖它）
+const DARK_THEMES = new Set(['aurora', 'terminal', 'monokai', 'nord', 'dracula', 'synthwave', 'tokyonight', 'matrix'])
+
+export function isDarkTheme(id) {
+  return DARK_THEMES.has(id)
+}
+
+function applyThemeAttrs(id) {
+  document.documentElement.setAttribute('data-theme', id)
+  document.documentElement.classList.toggle('dark', isDarkTheme(id))
+}
+
 function storedTheme() {
   try {
     const t = localStorage.getItem(STORAGE_KEY)
@@ -39,7 +51,7 @@ export function setTheme(id) {
   if (!THEMES.some((t) => t.id === id) || id === themeState.id) return
   themeState.id = id
   themeState.version++
-  document.documentElement.setAttribute('data-theme', id)
+  applyThemeAttrs(id)
   try {
     localStorage.setItem(STORAGE_KEY, id)
   } catch (e) { /* 隐私模式下忽略 */ }
@@ -47,7 +59,7 @@ export function setTheme(id) {
 
 // 首帧前应用持久化主题（index.html 内联脚本已做同样处理，这里兜底）
 export function initTheme() {
-  document.documentElement.setAttribute('data-theme', themeState.id)
+  applyThemeAttrs(themeState.id)
 }
 
 // ---------------- 图表主题（ECharts / sparkline 颜色） ----------------

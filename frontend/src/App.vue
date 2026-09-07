@@ -1,6 +1,7 @@
 <template>
   <TerminalFrame>
-    <router-view />
+    <!-- :key 按主机 id 强制重建：切换主机时重置 WS 流 / 历史 / 服务管理等全部组件状态 -->
+    <router-view :key="$route.params.id" />
   </TerminalFrame>
 </template>
 

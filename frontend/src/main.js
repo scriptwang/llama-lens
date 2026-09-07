@@ -2,6 +2,8 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { ElLoading } from 'element-plus/es/components/loading/index.mjs'
 import 'element-plus/dist/index.css'
+// Element Plus 暗色变量（html.dark 下生效，随主题系统同步切换）
+import 'element-plus/theme-chalk/dark/css-vars.css'
 import {
   ArrowLeft, ArrowRight, ArrowUp, Back, Brush, Close, CopyDocument, Cpu, DataLine,
   Document, EditPen, Folder, FolderOpened, Grid, Lightning, Monitor, Moon, Odometer,

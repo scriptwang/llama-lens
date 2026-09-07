@@ -10,10 +10,12 @@
     (function () {
       try {
         var t = localStorage.getItem('llamalens.theme')
-        var ok = ['aurora', 'terminal', 'light', 'monokai', 'nord', 'dracula', 'synthwave', 'tokyonight', 'matrix']
-        if (ok.indexOf(t) !== -1) {
-          document.documentElement.setAttribute('data-theme', t)
-        }
+      var ok = ['aurora', 'terminal', 'light', 'monokai', 'nord', 'dracula', 'synthwave', 'tokyonight', 'matrix']
+      if (ok.indexOf(t) !== -1) {
+        document.documentElement.setAttribute('data-theme', t)
+        // 同步 dark 类（Element Plus 暗色变量 / 管理区样式依赖），与 theme/index.js 保持一致
+        document.documentElement.classList.toggle('dark', t !== 'light')
+      }
       } catch (e) {}
     })()
   </script>

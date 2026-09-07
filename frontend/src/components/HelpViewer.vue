@@ -154,6 +154,6 @@ function scrollToLine(idx) {
   padding: 1px 4px;
   border-radius: 4px;
 }
-.hd-line.match { background: rgba(79, 110, 247, 0.12); color: var(--lc-text); }
-.hd-line.active { background: rgba(245, 158, 11, 0.22); color: var(--lc-text); }
+.hd-line.match { background: color-mix(in srgb, var(--lc-primary) 12%, transparent); color: var(--lc-text); }
+.hd-line.active { background: color-mix(in srgb, var(--lc-warning) 22%, transparent); color: var(--lc-text); }
 </style>
