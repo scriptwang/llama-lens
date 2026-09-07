@@ -21,7 +21,7 @@
       <button :class="{ on: tab === 'monitor' }" @click="switchTab('monitor')">监控</button>
       <button :class="{ on: tab === 'service' }" @click="switchTab('service')">服务</button>
       <button :class="{ on: tab === 'model' }" @click="switchTab('model')">模型</button>
-      <button :class="{ on: tab === 'playground' }" @click="switchTab('playground')">Playground</button>
+      <button :class="{ on: tab === 'playground' }" @click="switchTab('playground')">试玩</button>
     </nav>
 
     <main class="content">

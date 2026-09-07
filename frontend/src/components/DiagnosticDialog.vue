@@ -1,5 +1,5 @@
 <template>
-  <el-dialog v-model="visible" title="一键体检" width="760px" top="6vh" :close-on-click-modal="false">
+  <el-dialog v-model="visible" title="一键体检" width="760px" top="6vh" append-to-body :close-on-click-modal="false">
     <div v-loading="loading" class="diag">
       <div v-if="summary" class="diag-summary">
         <el-tag :type="summary.llama_online ? 'success' : 'danger'" size="small">

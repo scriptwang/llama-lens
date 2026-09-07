@@ -14,9 +14,6 @@
       </span>
       <span v-else class="mt-mem mt-mem-none">无内存数据（监控未启用且探测失败）</span>
       <span class="toolbar-spacer" />
-      <el-input v-model="keyword" size="small" class="mt-search" placeholder="搜索名称 / 路径" clearable>
-        <template #prefix><el-icon><Search /></el-icon></template>
-      </el-input>
       <el-select v-model="minMb" size="small" class="mt-size-filter" @change="loadModels">
         <el-option label="全部大小" :value="0" />
         <el-option label="≥ 50 MB" :value="50" />
@@ -26,6 +23,11 @@
       <el-button type="primary" size="small" :loading="loading" @click="loadModels">
         <el-icon style="margin-right:4px"><Refresh /></el-icon>刷新
       </el-button>
+    </div>
+    <div class="ctl-toolbar">
+      <el-input v-model="keyword" size="small" class="mt-search" placeholder="搜索模型名称 / 路径" clearable>
+        <template #prefix><el-icon><Search /></el-icon></template>
+      </el-input>
     </div>
 
     <el-empty v-if="!loading && !models.length" description="浏览路径下未扫描到 .gguf 模型文件（可在【主机管理】调整浏览路径）" :image-size="60" />
@@ -220,7 +222,7 @@ onMounted(async () => {
 <style scoped>
 .mt-title { font-weight: 600; }
 .mt-size-filter { width: 110px; }
-.mt-search { width: 200px; }
+.mt-search { width: 320px; }
 .mt-mem { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .mt-mem-tag { font-family: var(--font-mono, monospace); }
 .mt-mem-none { color: var(--text-dim, #888); font-size: 12px; }
