@@ -20,6 +20,7 @@
       <button :class="{ on: tab === 'monitor' }" @click="switchTab('monitor')">监控</button>
       <button :class="{ on: tab === 'service' }" @click="switchTab('service')">服务</button>
       <button :class="{ on: tab === 'model' }" @click="switchTab('model')">模型</button>
+      <button :class="{ on: tab === 'playground' }" @click="switchTab('playground')">Playground</button>
     </nav>
 
     <main class="content">
@@ -180,6 +181,14 @@
         :active="tab === 'model'"
         :host-label="hostName"
       />
+
+      <!-- ============ Playground Tab（P1-1：聊天 + 性能指标） ============ -->
+      <PlaygroundTab
+        v-show="tab === 'playground'"
+        :host-id="props.id"
+        :active="tab === 'playground'"
+        :host-label="hostName"
+      />
     </main>
 
     <div v-if="mode === 'paused' && tab === 'monitor'" class="paused-watermark"><span>已暂停</span></div>
@@ -211,6 +220,7 @@ import TrendChart from '../components/TrendChart.vue'
 import EventFeed from '../components/EventFeed.vue'
 import ServiceTab from '../components/ServiceTab.vue'
 import ModelTab from '../components/ModelTab.vue'
+import PlaygroundTab from '../components/PlaygroundTab.vue'
 
 const props = defineProps({ id: { type: String, required: true } })
 
@@ -222,7 +232,10 @@ const route = useRoute()
 const router = useRouter()
 const tab = computed(() => {
   const t = route.query.tab
-  return t === 'service' ? 'service' : t === 'model' ? 'model' : 'monitor'
+  if (t === 'service') return 'service'
+  if (t === 'model') return 'model'
+  if (t === 'playground') return 'playground'
+  return 'monitor'
 })
 function switchTab(t) {
   if (t === tab.value) return

@@ -18,6 +18,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 
 from .api import router as api_router
+from .playground import router as playground_router
 from .config import AppConfig, GlobalConfig, load_config
 from .ctl.errors import ApiError, api_error_handler
 from .ctl.hostsync import import_from_yaml_if_empty, load_hosts_from_db
@@ -156,6 +157,7 @@ def create_app(base_dir: Optional[str] = None) -> FastAPI:
 
     app = FastAPI(title="llama灵境", lifespan=lifespan)
     app.include_router(api_router)
+    app.include_router(playground_router)
     app.include_router(ws_router)
     for r in ctl_routers:
         app.include_router(r)
