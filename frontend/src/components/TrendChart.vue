@@ -45,7 +45,8 @@ function buildOption() {
       step: s.step,
       area: s.area,
       stack: s.stack,
-      markLine: s.markLine
+      markLine: s.markLine,
+      connectNulls: s.connectNulls
     })
   })
   if (props.yMax !== null) opt.yAxis.max = props.yMax

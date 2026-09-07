@@ -150,8 +150,12 @@ async function ctlPollMetrics() {
 async function onCtlAction(service, action) {
   ctlActionLoading.value[service.name] = action
   try {
-    await http.post(`/services/${encodeURIComponent(service.name)}/${action}`, null,
+    const data = await http.post(`/services/${encodeURIComponent(service.name)}/${action}`, null,
       { params: { host_id: ctlDbId.value } })
+    // 后端等待 systemctl 完成并返回最新状态：直接合并进列表项，按钮/状态立即切换
+    const item = ctlServices.value.find((s) => s.name === service.name)
+    if (item && data) Object.assign(item, data)
+    else ctlScan()
     ctlPollMetrics()
   } catch (e) { /* client 已提示 */ }
   finally {

@@ -50,7 +50,7 @@ export function lineSeries(name, data, color, opts = {}) {
     smooth: opts.step ? false : 0.2,
     step: opts.step ? 'start' : false,
     symbol: 'none',
-    connectNulls: false,
+    connectNulls: !!opts.connectNulls,
     lineStyle: {
       width: 1.5,
       color,

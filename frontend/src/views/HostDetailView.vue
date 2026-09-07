@@ -495,7 +495,7 @@ function onVisibilityChange() {
 function seriesOf(name, opts = {}) {
   const s = history.value && history.value.series ? history.value.series[name] : null
   if (!s) return null
-  return { name: opts.name || name, ts: s.ts, values: s.values, color: opts.color, step: opts.step, area: opts.area, stack: opts.stack, markLine: opts.markLine }
+  return { name: opts.name || name, ts: s.ts, values: s.values, color: opts.color, step: opts.step, area: opts.area, stack: opts.stack, markLine: opts.markLine, connectNulls: opts.connectNulls }
 }
 
 const chartGen = computed(() => {
@@ -588,7 +588,7 @@ const chartCtx = computed(() => {
   return [s]
 })
 const chartMtp = computed(() => {
-  const s = seriesOf('mtp_acceptance', { name: '接受率', color: chartTheme().green, step: true })
+  const s = seriesOf('mtp_acceptance', { name: '接受率', color: chartTheme().green, step: true, connectNulls: true })
   if (!s) return []
   s.values = s.values.map((v) => (v === null ? null : v * 100))
   return [s]
