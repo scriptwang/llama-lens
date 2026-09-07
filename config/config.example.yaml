@@ -6,12 +6,12 @@
 
 server:
   port: 8000                 # 面板端口（env PORT）
-  # host: 0.0.0.0            # 监听地址（env LLAMACTL_HOST，面板固定 0.0.0.0）
+  host: 0.0.0.0            # 监听地址（env LLAMACTL_HOST，面板固定 0.0.0.0）
   data_dir: data             # 数据目录：主机库 + 监控历史 + 密钥（env LLAMACTL_DATA_DIR）
-  # db_path: data/llama_ctl.db   # 主机库路径（env LLAMACTL_DB_PATH）
+  db_path: data/llama_ctl.db   # 主机库路径（env LLAMACTL_DB_PATH）
   auth_enabled: true         # 登录鉴权开关（env LLAMACTL_AUTH_ENABLED，不建议关闭）
-  admin_user: admin          # 管理员用户名（env LLAMACTL_ADMIN_USER）
-  # admin_password: xxx      # 初始管理员密码，仅首次启动（users 表为空）生效（env LLAMACTL_ADMIN_PASSWORD）
+  admin_user: root          # 管理员用户名（env LLAMACTL_ADMIN_USER）
+  admin_password: 123456      # 初始管理员密码，仅首次启动（users 表为空）生效（env LLAMACTL_ADMIN_PASSWORD）
   ssh_timeout: 10            # SSH 命令超时秒数（env LLAMACTL_SSH_TIMEOUT）
   # jwt_secret: ""           # JWT 签名密钥；留空则用 data/jwt.secret 自动生成（env LLAMACTL_JWT_SECRET）
   # fernet_key: ""           # 凭证加密密钥；留空则用 data/fernet.key 自动生成（env LLAMACTL_FERNET_KEY）
@@ -21,22 +21,12 @@ global:
   history:
     llama_points: 3600        # llama 序列环形缓冲点数（@1s，3600 = 1h）
     host_points: 1800         # host 序列环形缓冲点数（@2s，1800 = 1h）
-    # enabled: true           # 历史持久化开关（默认 true）
-    # raw_retention_days: 7   # 原始数据保留天数
-    # agg_retention_days: 90  # 1 分钟聚合数据保留天数
-    # events_retention_days: 30
-  # electricity_price: 0.0    # 电价（元/kWh，0 = 不显示电费；效率统计用）
-  # thresholds:               # 全局阈值覆盖（可选，默认见 backend/config.py）
-  #   gpu_util: {warn: 80, danger: 90}
-  #   ctx: {warn: 80, danger: 90}
-
-# hosts:                      # 可选：仅当数据库为空时一次性导入（老部署迁移用），导入后请删除
-#   - id: ai
-#     name: AI 主机
-#     llama: {host: 10.0.0.28, port: 8080, interval: 1.0, slow_interval: 30.0, timeout: 3.0}
-#     ssh: {host: 10.0.0.28, port: 22, user: root, password: ${AI_SSH_PASS},
-#           interval: 2.0, keepalive: 15, timeout: 15.0}
-#     process: {name: llama-server}
-#     systemd_unit: llama-server.service
-#     log: {source: journal, unit: llama-server, follow: true, catchup_sec: 30}
-#     disk_mounts: [/, /share]
+    enabled: true           # 历史持久化开关（默认 true）
+    db_path: data/history.db  # 监控历史库路径，相对项目根目录（无 env 覆盖）
+    raw_retention_days: 7   # 原始数据保留天数
+    agg_retention_days: 90  # 1 分钟聚合数据保留天数
+    events_retention_days: 30
+  electricity_price: 0.5    # 电价（元/kWh，0 = 不显示电费；效率统计用）
+  thresholds:               # 全局阈值覆盖（可选，默认见 backend/config.py）
+    gpu_util: {warn: 80, danger: 95}
+    ctx: {warn: 80, danger: 90}
