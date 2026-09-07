@@ -710,8 +710,8 @@ onMounted(() => {
 .pg-row { display: flex; gap: 10px; align-items: flex-end; }
 .pg-row :deep(.el-textarea__inner) { min-height: 84px; max-height: 320px; }
 .pg-btns { display: flex; flex-direction: column; gap: 8px; flex: none; }
-.pg-btns .el-button { width: 60px; }
-.pg-row .pg-btns .el-button:last-child { height: 42px; }
+.pg-btns .el-button { width: 60px; height: 42px; }
+.pg-btns .pg-attach { display: inline-flex; align-items: center; justify-content: center; padding: 0; }
 .pg-file { display: none; }
 /* 会话行 */
 .pg-sessions { display: flex; align-items: center; gap: 8px; }

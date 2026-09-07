@@ -168,7 +168,7 @@ def connect(req: HostConnectReq, request: Request, user: str = Depends(get_curre
                ssh_timeout, key_path, process_name, systemd_unit,
                log_source, log_unit, log_path, log_follow, log_catchup_sec,
                disk_mounts, thresholds, notify_enabled, notify_type, notify_url)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (mid, req.alias, req.host, req.port, req.username, enc, req.auth_type,
              enc_pass, req.browse_paths or "", _now(), *mon_vals),
         )
