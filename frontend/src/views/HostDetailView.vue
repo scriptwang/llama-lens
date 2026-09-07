@@ -19,6 +19,7 @@
     <nav class="tabs">
       <button :class="{ on: tab === 'monitor' }" @click="switchTab('monitor')">监控</button>
       <button :class="{ on: tab === 'service' }" @click="switchTab('service')">服务</button>
+      <button :class="{ on: tab === 'model' }" @click="switchTab('model')">模型</button>
     </nav>
 
     <main class="content">
@@ -171,6 +172,14 @@
         :active="tab === 'service'"
         :host-label="hostName"
       />
+
+      <!-- ============ 模型 Tab（P0-2：清单 + 适配预估 + 一键切换） ============ -->
+      <ModelTab
+        v-show="tab === 'model'"
+        :host-id="props.id"
+        :active="tab === 'model'"
+        :host-label="hostName"
+      />
     </main>
 
     <div v-if="mode === 'paused' && tab === 'monitor'" class="paused-watermark"><span>已暂停</span></div>
@@ -201,6 +210,7 @@ import SlotTable from '../components/SlotTable.vue'
 import TrendChart from '../components/TrendChart.vue'
 import EventFeed from '../components/EventFeed.vue'
 import ServiceTab from '../components/ServiceTab.vue'
+import ModelTab from '../components/ModelTab.vue'
 
 const props = defineProps({ id: { type: String, required: true } })
 
@@ -210,10 +220,13 @@ const snap = computed(() => snapshot.value)
 // ---------------- 平级 Tab：监控 / 服务 ----------------
 const route = useRoute()
 const router = useRouter()
-const tab = computed(() => (route.query.tab === 'service' ? 'service' : 'monitor'))
+const tab = computed(() => {
+  const t = route.query.tab
+  return t === 'service' ? 'service' : t === 'model' ? 'model' : 'monitor'
+})
 function switchTab(t) {
   if (t === tab.value) return
-  router.replace({ query: t === 'service' ? { tab: 'service' } : {} })
+  router.replace({ query: t === 'monitor' ? {} : { tab: t } })
 }
 
 // ---------------- 基础字段 ----------------

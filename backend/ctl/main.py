@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from . import database as db
 from .config import settings
 from .errors import ApiError, api_error_handler, ok, unhandled_error_handler
-from .routers import auth, config, hosts, logs, metrics, notify, params, rules, services
+from .routers import auth, config, hosts, logs, metrics, models, notify, params, rules, services
 from .routers.rules import DEFAULT_RULES
 from .security import hash_password
 from .ssh_pool import pool
@@ -42,8 +42,9 @@ def shutdown_ctl() -> None:
 
 
 # 供 LlamaLens 主入口挂载的路由（/api/health 由主入口提供，不重复挂载）
-ctl_routers = (auth.router, hosts.router, services.router, config.router,
-               params.router, rules.router, logs.router, metrics.router, notify.router)
+# models.svc_router 必须在 services.router 之前注册（静态 /switch-model 优先于通配 /{action}）
+ctl_routers = (auth.router, hosts.router, models.router, models.svc_router, services.router,
+               config.router, params.router, rules.router, logs.router, metrics.router, notify.router)
 
 
 @asynccontextmanager
