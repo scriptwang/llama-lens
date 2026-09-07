@@ -35,7 +35,7 @@ const props = defineProps({
   defaultEnabled: { type: Boolean, default: false }, // config.yaml ui.auto_browse.enabled 默认开关
 })
 
-const STORE_KEY = 'llamalens.autobrowse'
+const STORE_KEY = 'llamalens.autobrowse.v2'  // v2：auto_browse 默认值改为可配置后重置本地设置
 const enabled = ref(false)
 const mode = ref('scroll')        // scroll=自动滑动 | carousel=轮播
 const speed = ref(80)             // 自动滑动速度 px/s
@@ -43,9 +43,12 @@ const interval = ref(8)           // 轮播时长 秒/屏
 const paused = ref(false)
 
 // 恢复上次设置（无本地设置时，开关取 config.yaml 默认值）
+let hasSaved = false
+let userToggled = false
 try {
   const saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null')
   if (saved) {
+    hasSaved = true
     if (typeof saved.enabled === 'boolean') enabled.value = saved.enabled
     if (saved.mode === 'scroll' || saved.mode === 'carousel') mode.value = saved.mode
     if (Number.isFinite(saved.speed)) speed.value = Math.min(400, Math.max(20, saved.speed))
@@ -54,6 +57,12 @@ try {
     enabled.value = props.defaultEnabled
   }
 } catch { /* 忽略损坏的本地设置 */ }
+
+// 配置默认值异步到达（uiCfg 在 onMounted 才加载完）：用户未手动切换过时跟随配置
+watch(() => props.defaultEnabled, (v) => {
+  if (!hasSaved && !userToggled) enabled.value = v
+})
+watch(enabled, () => { userToggled = true })
 
 watch([enabled, mode, speed, interval], () => {
   try {
