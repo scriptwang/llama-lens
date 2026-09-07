@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from . import database as db
 from .config import settings
 from .errors import ApiError, api_error_handler, ok, unhandled_error_handler
-from .routers import (auth, config, diagnostic, hosts, logs, metrics, models, notify,
+from .routers import (auth, chat, config, diagnostic, hosts, logs, metrics, models, notify,
                           params, rules, services, ui)
 from .routers.rules import DEFAULT_RULES
 from .security import hash_password
@@ -46,7 +46,7 @@ def shutdown_ctl() -> None:
 # models.svc_router 必须在 services.router 之前注册（静态 /switch-model 优先于通配 /{action}）
 ctl_routers = (auth.router, hosts.router, models.router, models.svc_router, services.router,
                config.router, params.router, rules.router, logs.router, metrics.router,
-               notify.router, diagnostic.router, ui.router)
+               notify.router, diagnostic.router, ui.router, chat.router)
 
 
 @asynccontextmanager

@@ -29,6 +29,8 @@ let ro = null
 
 function buildOption() {
   const opt = baseOption()
+  // 按数据跨度自适应 x 轴时间格式：<1h 时分秒，1h~1d 时分，>=1d 带日期
+  opt.xAxis.axisLabel.formatter = (v) => formatAxisTime(v, dataSpan())
   opt.series = props.series.map((s, i) => {
     const pal = palette()
     const color = s.color || pal[i % pal.length]
@@ -53,6 +55,27 @@ function buildOption() {
     }
   }
   return opt
+}
+
+// 所有序列的时间跨度（秒）；无数据返回 0
+function dataSpan() {
+  let min = Infinity, max = -Infinity
+  for (const s of props.series) {
+    const ts = s.ts || []
+    if (ts.length) {
+      if (ts[0] < min) min = ts[0]
+      if (ts[ts.length - 1] > max) max = ts[ts.length - 1]
+    }
+  }
+  return max > min ? max - min : 0
+}
+
+function formatAxisTime(v, span) {
+  const d = new Date(v)
+  const p = (n) => String(n).padStart(2, '0')
+  if (span >= 86400) return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes())
+  if (span >= 3600) return p(d.getHours()) + ':' + p(d.getMinutes())
+  return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds())
 }
 
 function render() {

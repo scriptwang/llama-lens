@@ -14,7 +14,8 @@
 
     <!-- 聊天区 -->
     <div ref="chatBox" class="pg-chat">
-      <div v-if="!chat.length" class="pg-empty">
+      <div v-if="loadingSessions && !chat.length" class="pg-empty">加载会话中…</div>
+      <div v-else-if="!chat.length" class="pg-empty">
         输入消息开始推理测试——流式回复，自动统计 TTFT / tokens/s / 总耗时；支持图片（需模型带 mmproj）
       </div>
       <div v-for="(m, i) in chat" :key="i" class="pg-msg" :class="m.role">
@@ -39,6 +40,7 @@
           <span v-else-if="streaming && i === chat.length - 1" class="pg-cursor">▍</span>
           <span v-else-if="m.error" class="pg-err">{{ m.error }}</span>
           <span v-else-if="!m.reasoning" class="pg-muted">（无内容）</span>
+          <span v-if="m.stopped" class="pg-stopped">（已手动停止）</span>
         </div>
         <div v-if="m.metrics" class="pg-metrics">
           <span v-if="m.metrics.ttft_ms != null">TTFT {{ m.metrics.ttft_ms }} ms</span>
@@ -93,8 +95,11 @@
           <el-button class="pg-attach" title="添加图片" @click="fileRef && fileRef.click()">
             <el-icon :size="18"><Picture /></el-icon>
           </el-button>
-          <el-button type="primary" :loading="streaming" :disabled="!input.trim() && !pendingImages.length" @click="send">
+          <el-button v-if="!streaming" type="primary" :disabled="!input.trim() && !pendingImages.length" @click="send">
             发送
+          </el-button>
+          <el-button v-else type="danger" @click="stop">
+            停止
           </el-button>
         </div>
         <input ref="fileRef" type="file" accept="image/*" multiple class="pg-file" @change="onPickImages" />
@@ -133,7 +138,7 @@ import { renderMd } from '../utils/md'
 
 // Playground Tab（P1-1）：代理 llama-server 聊天（SSE 流式）+ TTFT/tokens/s 指标。
 // 增强：图片消息（mmproj）、采样参数（top_k/top_p/min_p/重复惩罚/max_tokens）、
-// 会话历史（localStorage 按主机保存，可新建/切换/删除）。
+// 会话历史（存业务库 llama_ctl.db，按 host+user，可新建/切换/删除）。
 // hostId=mid（主监控 API 直接用 mid，无需 db_id）。
 const props = defineProps({
   hostId: { type: String, required: true },
@@ -169,97 +174,135 @@ function resetParams() {
   Object.assign(params, DEFAULT_PARAMS)
 }
 
-// ---------------- 会话历史（localStorage 按主机保存） ----------------
-const SKEY = `llamalens.pg.sessions.${props.hostId}`
-const MAX_SESSIONS = 20
+// ---------------- 会话历史（存业务库 llama_ctl.db，按 host+user 维度） ----------------
 const store = reactive({ current: '', sessions: {} })
+const loadingSessions = ref(false)
 
 function newSessionId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
 }
 function blankSession() {
-  return { title: '新会话', created: Date.now(), messages: [] }
+  return { title: '新会话', created: Date.now(), updated: Date.now() }
 }
-function loadStore() {
+function authHeaders() {
+  return { Authorization: `Bearer ${localStorage.getItem('llama_token')}` }
+}
+async function apiGet(path) {
+  const resp = await fetch(path, { headers: { Accept: 'application/json', ...authHeaders() } })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  const j = await resp.json()
+  if (j.code !== 0) throw new Error(j.msg || '请求失败')
+  return j.data
+}
+async function apiSend(path, method, body) {
+  const resp = await fetch(path, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  const j = await resp.json()
+  if (j.code !== 0) throw new Error(j.msg || '请求失败')
+  return j.data
+}
+function hydrateMessages(msgs) {
+  return (msgs || []).map((m) => ({ ...m, images: m.images ? [...m.images] : [] }))
+}
+function sessPath(id) {
+  return `/api/hosts/${encodeURIComponent(props.hostId)}/chat/sessions/${encodeURIComponent(id)}`
+}
+
+// 加载会话列表 + 最近会话的消息
+async function loadStore() {
+  loadingSessions.value = true
   try {
-    const saved = JSON.parse(localStorage.getItem(SKEY) || 'null')
-    if (saved && saved.sessions && Object.keys(saved.sessions).length) {
-      store.current = saved.current && saved.sessions[saved.current] ? saved.current : Object.keys(saved.sessions)[0]
-      store.sessions = saved.sessions
+    const list = await apiGet(`/api/hosts/${encodeURIComponent(props.hostId)}/chat/sessions`)
+    store.sessions = {}
+    for (const s of list) store.sessions[s.id] = { title: s.title, created: s.created_at, updated: s.updated_at }
+    if (list.length) {
+      store.current = list[0].id
+      chat.value = hydrateMessages(await getSessionMessages(store.current))
+    } else {
+      store.current = newSessionId()
+      store.sessions[store.current] = blankSession()
+      chat.value = []
     }
-  } catch { /* 忽略损坏的历史 */ }
-  if (!store.sessions[store.current]) {
-    store.current = newSessionId()
-    store.sessions[store.current] = blankSession()
+  } catch (e) {
+    if (!store.current) {
+      store.current = newSessionId()
+      store.sessions[store.current] = blankSession()
+      chat.value = []
+    }
+  } finally {
+    loadingSessions.value = false
+    scrollBottom()
   }
-  chat.value = (store.sessions[store.current].messages || []).map((m) => ({ ...m, images: m.images ? [...m.images] : [] }))
 }
+async function getSessionMessages(id) {
+  const d = await apiGet(sessPath(id))
+  return d.messages || []
+}
+// 保存当前会话到库。用 promise 链串行化，避免快速连续保存时 API 乱序覆盖（丢消息）。
+let persistChain = Promise.resolve()
 function persist() {
-  // 同步当前会话到 store
-  store.sessions[store.current] = {
-    title: store.sessions[store.current].title,
-    created: store.sessions[store.current].created,
-    messages: chat.value,
-  }
-  // 会话数上限：丢弃最旧的非当前会话
-  const ids = Object.keys(store.sessions).filter((i) => i !== store.current)
-    .sort((a, b) => store.sessions[a].created - store.sessions[b].created)
-  while (ids.length && Object.keys(store.sessions).length > MAX_SESSIONS) {
-    delete store.sessions[ids.shift()]
-  }
-  try {
-    localStorage.setItem(SKEY, JSON.stringify(store))
-  } catch {
-    // 超配额（多为图片）：逐个丢弃最旧会话后重试
-    for (const id of ids) {
-      delete store.sessions[id]
-      try { localStorage.setItem(SKEY, JSON.stringify(store)); return } catch { /* 继续丢 */ }
-    }
-  }
+  const id = store.current
+  if (!id) return persistChain
+  const sess = store.sessions[id]
+  const title = sess ? sess.title : '新会话'
+  const messages = chat.value  // 捕获当前消息数组引用（切换会话后仍指向本会话）
+  persistChain = persistChain.then(() =>
+    apiSend(sessPath(id), 'PUT', { title, messages })
+      .then(() => { if (sess) sess.updated = Date.now() })
+      .catch((e) => console.warn('保存会话失败', e))
+  )
+  return persistChain
 }
 const sessionList = computed(() =>
   Object.entries(store.sessions)
-    .map(([id, ss]) => ({ id, title: ss.title, created: ss.created }))
-    .sort((a, b) => b.created - a.created))
+    .map(([id, ss]) => ({ id, title: ss.title, created: ss.created, updated: ss.updated }))
+    .sort((a, b) => (b.updated || b.created) - (a.updated || a.created)))
 
 function newSession() {
   if (streaming.value) { ElMessage.warning('等待当前回复完成'); return }
-  persist()
   store.current = newSessionId()
   store.sessions[store.current] = blankSession()
   chat.value = []
-  persist()
-}
-function loadSession(id) {
-  if (streaming.value) { ElMessage.warning('等待当前回复完成'); return }
-  if (id === store.current) return
-  persist()
-  store.current = id
-  chat.value = (store.sessions[id].messages || []).map((m) => ({ ...m, images: m.images ? [...m.images] : [] }))
-  persist()
   scrollBottom()
 }
-function deleteSession(id) {
+async function loadSession(id) {
   if (streaming.value) { ElMessage.warning('等待当前回复完成'); return }
+  if (id === store.current) return
+  store.current = id
+  chat.value = []
+  try {
+    chat.value = hydrateMessages(await getSessionMessages(id))
+  } catch (e) {
+    ElMessage.error('加载会话失败')
+  }
+  scrollBottom()
+}
+async function deleteSession(id) {
+  if (streaming.value) { ElMessage.warning('等待当前回复完成'); return }
+  try { await apiSend(sessPath(id), 'DELETE') } catch (e) { /* 忽略删除失败 */ }
   delete store.sessions[id]
   if (id === store.current) {
     const rest = Object.keys(store.sessions)
     if (rest.length) {
-      store.current = rest.sort((a, b) => store.sessions[b].created - store.sessions[a].created)[0]
-      chat.value = (store.sessions[store.current].messages || []).map((m) => ({ ...m, images: m.images ? [...m.images] : [] }))
+      store.current = rest.sort((a, b) => (store.sessions[b].updated || store.sessions[b].created) - (store.sessions[a].updated || store.sessions[a].created))[0]
+      loadSession(store.current)
     } else {
       store.current = newSessionId()
       store.sessions[store.current] = blankSession()
       chat.value = []
     }
   }
-  persist()
   scrollBottom()
 }
 function clearCurrent() {
   if (streaming.value) { ElMessage.warning('等待当前回复完成'); return }
   chat.value = []
-  store.sessions[store.current] = { ...store.sessions[store.current], title: '新会话', messages: [] }
+  const sess = store.sessions[store.current]
+  if (sess) { sess.title = '新会话'; sess.updated = Date.now() }
   persist()
 }
 function fmtTime(ts) {
@@ -397,9 +440,15 @@ function toApiMessages() {
     })
 }
 
+let abortCtrl = null
+function stop() {
+  if (abortCtrl) abortCtrl.abort()
+}
+
 async function send() {
   const text = input.value.trim()
   if ((!text && !pendingImages.value.length) || streaming.value) return
+  if (!store.current) { store.current = newSessionId(); store.sessions[store.current] = blankSession() }
   const images = [...pendingImages.value]
   input.value = ''
   pendingImages.value = []
@@ -413,6 +462,7 @@ async function send() {
     sess.title = (text || '（图片）').slice(0, 24)
   }
   streaming.value = true
+  abortCtrl = new AbortController()
   scrollBottom()
   try {
     const token = localStorage.getItem('llama_token')
@@ -422,6 +472,7 @@ async function send() {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
+      signal: abortCtrl.signal,
       body: JSON.stringify({
         messages: toApiMessages(),
         temperature: params.temperature,
@@ -448,9 +499,14 @@ async function send() {
       }
     }
   } catch (e) {
-    asst.error = String((e && e.message) || e)
+    if (e && e.name === 'AbortError') {
+      asst.stopped = true
+    } else {
+      asst.error = String((e && e.message) || e)
+    }
   } finally {
     streaming.value = false
+    abortCtrl = null
     scrollBottom()
     persist()
   }
@@ -600,6 +656,7 @@ onMounted(() => {
 @keyframes pg-blink { 50% { opacity: 0; } }
 .pg-err { color: var(--red); }
 .pg-muted { color: var(--text-faint); }
+.pg-stopped { color: var(--amber); font-size: 12px; }
 .pg-metrics { font-size: 11px; color: var(--text-dim); font-family: var(--font-mono, monospace); }
 .pg-input { display: flex; flex-direction: column; gap: 10px; }
 /* 参数行 */

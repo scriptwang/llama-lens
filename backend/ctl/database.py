@@ -62,6 +62,17 @@ CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS chat_sessions (
+  id          TEXT PRIMARY KEY,
+  host_id     TEXT NOT NULL,
+  user        TEXT NOT NULL DEFAULT 'admin',
+  title       TEXT NOT NULL DEFAULT '新会话',
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL,
+  messages    TEXT NOT NULL DEFAULT '[]'
+);
+CREATE INDEX IF NOT EXISTS idx_chat_host ON chat_sessions (host_id, user, updated_at);
 """
 
 _conn = None
