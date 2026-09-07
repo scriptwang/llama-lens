@@ -20,7 +20,9 @@ const props = defineProps({
   series: { type: Array, default: () => [] },
   height: { type: Number, default: 180 },
   yMax: { type: Number, default: null },
-  yMin: { type: Number, default: null }
+  yMin: { type: Number, default: null },
+  // span: 选择的时间窗口（秒）；x 轴范围与刻度格式按它计算，无数据时坐标依然正确
+  span: { type: Number, default: null }
 })
 
 const el = ref(null)
@@ -29,8 +31,12 @@ let ro = null
 
 function buildOption() {
   const opt = baseOption()
-  // 按数据跨度自适应 x 轴时间格式：<1h 时分秒，1h~1d 时分，>=1d 带日期
-  opt.xAxis.axisLabel.formatter = (v) => formatAxisTime(v, dataSpan())
+  // x 轴按「选择的时间窗口」定范围与刻度格式（无数据时坐标依然正确）；未传 span 时退回数据跨度
+  const spanSec = props.span || dataSpan() || 3600
+  const now = Date.now()
+  opt.xAxis.min = now - spanSec * 1000
+  opt.xAxis.max = now
+  opt.xAxis.axisLabel.formatter = (v) => formatAxisTime(v, spanSec)
   opt.series = props.series.map((s, i) => {
     const pal = palette()
     const color = s.color || pal[i % pal.length]
@@ -73,6 +79,7 @@ function dataSpan() {
 function formatAxisTime(v, span) {
   const d = new Date(v)
   const p = (n) => String(n).padStart(2, '0')
+  if (span >= 604800) return p(d.getMonth() + 1) + '-' + p(d.getDate())
   if (span >= 86400) return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes())
   if (span >= 3600) return p(d.getHours()) + ':' + p(d.getMinutes())
   return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds())
@@ -93,6 +100,7 @@ onMounted(async () => {
 
 watch(() => props.series, render, { deep: false })
 watch(() => [props.yMax, props.yMin], render)
+watch(() => props.span, render)
 watch(() => themeState.version, render)
 
 onBeforeUnmount(() => {

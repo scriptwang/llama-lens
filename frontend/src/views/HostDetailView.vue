@@ -146,20 +146,20 @@
           </div>
           <div class="trend-grid">
             <div class="trend-group">llama</div>
-            <TrendChart title="Token 生成速度" unit="tok/s" :series="chartGen" :height="170" />
-            <TrendChart title="预填充速度" unit="tok/s" :series="chartPrompt" :height="170" />
-            <TrendChart title="上下文占用" unit="tokens" :series="chartCtx" :height="170" />
-            <TrendChart title="MTP 接受率" unit="%" :series="chartMtp" :height="170" :y-max="100" :y-min="0" />
+            <TrendChart title="Token 生成速度" unit="tok/s" :series="chartGen" :span="winS" :height="170" />
+            <TrendChart title="预填充速度" unit="tok/s" :series="chartPrompt" :span="winS" :height="170" />
+            <TrendChart title="上下文占用" unit="tokens" :series="chartCtx" :span="winS" :height="170" />
+            <TrendChart title="MTP 接受率" unit="%" :series="chartMtp" :span="winS" :height="170" :y-max="100" :y-min="0" />
             <div class="trend-group">GPU</div>
-            <TrendChart title="GPU 利用率" unit="%" :series="chartGpuUtil" :height="170" :y-max="100" />
-            <TrendChart title="GPU 显存" unit="MB" :series="chartGpuMem" :height="170" />
-            <TrendChart title="GPU 温度" unit="°C" :series="chartGpuTemp" :height="170" />
-            <TrendChart title="GPU 功耗" unit="W" :series="chartGpuPower" :height="170" />
+            <TrendChart title="GPU 利用率" unit="%" :series="chartGpuUtil" :span="winS" :height="170" :y-max="100" />
+            <TrendChart title="GPU 显存" unit="MB" :series="chartGpuMem" :span="winS" :height="170" />
+            <TrendChart title="GPU 温度" unit="°C" :series="chartGpuTemp" :span="winS" :height="170" />
+            <TrendChart title="GPU 功耗" unit="W" :series="chartGpuPower" :span="winS" :height="170" />
             <div class="trend-group">系统</div>
-            <TrendChart title="CPU" unit="%" :series="chartCpu" :height="170" :y-max="100" />
-            <TrendChart title="内存" unit="MB" :series="chartMem" :height="170" />
-            <TrendChart title="网络" unit="MB/s" :series="chartNet" :height="170" />
-            <TrendChart title="负载均值" unit="load" :series="chartLoad" :height="170" />
+            <TrendChart title="CPU" unit="%" :series="chartCpu" :span="winS" :height="170" :y-max="100" />
+            <TrendChart title="内存" unit="MB" :series="chartMem" :span="winS" :height="170" />
+            <TrendChart title="网络" unit="MB/s" :series="chartNet" :span="winS" :height="170" />
+            <TrendChart title="负载均值" unit="load" :series="chartLoad" :span="winS" :height="170" />
           </div>
         </section>
 
