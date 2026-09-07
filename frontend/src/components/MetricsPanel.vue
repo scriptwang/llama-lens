@@ -180,7 +180,7 @@ const cards = computed(() => {
       key: 'cpu',
       icon: 'Cpu',
       label: 'CPU',
-      value: cpuPct != null ? cpuPct : null,
+      value: cpuPct != null ? Math.round(cpuPct * 10) / 10 : null,
       unit: '%',
       bar: cpuPct,
       barColor: level(cpuPct),
@@ -195,7 +195,7 @@ const cards = computed(() => {
       key: 'memory',
       icon: 'Odometer',
       label: '内存',
-      value: memPct != null ? memPct : null,
+      value: memPct != null ? Math.round(memPct * 10) / 10 : null,
       unit: '%',
       bar: memPct,
       barColor: level(memPct),
@@ -287,29 +287,30 @@ const cards = computed(() => {
   transition: background 0.15s ease;
   min-width: 0;
 }
-.cell:hover { background: rgba(79, 110, 247, 0.06); }
+.cell:hover { background: color-mix(in srgb, var(--lc-primary) 6%, transparent); }
 .cell-sep { width: 1px; background: var(--lc-border); margin: 8px 2px; flex: none; }
 .cell-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .cell-icon {
   width: 24px; height: 24px; border-radius: 7px; flex: none;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(79, 110, 247, 0.14); color: var(--lc-primary); font-size: 13px;
+  background: color-mix(in srgb, var(--lc-primary) 14%, transparent); color: var(--lc-primary); font-size: 13px;
 }
-.cell-icon.running { background: rgba(22, 163, 74, 0.14); color: var(--lc-success); }
-.cell-icon.stopped { background: rgba(100, 116, 139, 0.16); color: var(--lc-info); }
-.cell-icon.failed { background: rgba(239, 68, 68, 0.14); color: var(--lc-danger); }
+.cell-icon.running { background: color-mix(in srgb, var(--lc-success) 14%, transparent); color: var(--lc-success); }
+.cell-icon.stopped { background: color-mix(in srgb, var(--lc-info) 16%, transparent); color: var(--lc-info); }
+.cell-icon.failed { background: color-mix(in srgb, var(--lc-danger) 14%, transparent); color: var(--lc-danger); }
 .cell-label { font-size: 12px; color: var(--lc-text-secondary); white-space: nowrap; }
 .cell-value {
   margin-left: auto; font-size: 17px; font-weight: 700; line-height: 1;
   font-variant-numeric: tabular-nums; white-space: nowrap;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis;
 }
 .cell-value small { font-size: 11px; font-weight: 500; color: var(--lc-text-muted); margin-left: 1px; }
 .cell-value.placeholder { color: var(--lc-text-muted); font-weight: 400; }
 .cell-bar { height: 4px; border-radius: 2px; overflow: hidden; background: var(--lc-border); }
 .cell-bar-fill { height: 100%; border-radius: 2px; transition: width 0.6s ease; }
-.cell-bar-fill.ok { background: linear-gradient(90deg, #22c55e, #16a34a); }
-.cell-bar-fill.warn { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
-.cell-bar-fill.danger { background: linear-gradient(90deg, #f87171, #ef4444); }
+.cell-bar-fill.ok { background: var(--lc-success); }
+.cell-bar-fill.warn { background: var(--lc-warning); }
+.cell-bar-fill.danger { background: var(--lc-danger); }
 .cell-sub {
   font-size: 11px; color: var(--lc-text-muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

@@ -53,8 +53,13 @@ def _gpu_series(rows: List[tuple], json_idx: int, keys) -> Dict[str, Any]:
                 v = g.get(key)
                 if v is not None:
                     acc.setdefault(prefix + idx, []).append((r[0], v))
-    return {name: {"ts": [t for t, _ in pts], "values": [v for _, v in pts]}
-            for name, pts in acc.items()}
+    # 与标量序列一致：降采样到 600 点（24h 原始层 8.6 万行 / 90d 聚合层 13 万行，
+    # 不降采样会产生数 MB 的 JSON 并拖慢前端渲染）
+    out: Dict[str, Any] = {}
+    for name, pts in acc.items():
+        pts = downsample(pts, 600)
+        out[name] = {"ts": [t for t, _ in pts], "values": [v for _, v in pts]}
+    return out
 
 
 def _history_from_store(store, host_id: str, window: int) -> Dict[str, Any]:
@@ -63,15 +68,17 @@ def _history_from_store(store, host_id: str, window: int) -> Dict[str, Any]:
     series: Dict[str, Any] = {}
     if window <= RAW_MAX_WINDOW:
         tier = "raw"
-        stride = max(1, window // 600) if window > 86400 else 1
+        # 步长下推到 SQL：任意窗口都只取 ~600 行（24h 窗口从 8.6 万行降到 600 行）
+        stride = max(1, window // 600)
         series.update(_series_from_rows(store.query_llama(host_id, t0, t1, stride), _LLAMA_COLS))
         hrows = store.query_host(host_id, t0, t1, stride)
         series.update(_series_from_rows(hrows, _HOST_COLS))
         series.update(_gpu_series(hrows, 11, _GPU_KEYS))
     else:
         tier = "1m"
-        series.update(_series_from_rows(store.query_llama_1m(host_id, t0, t1), _LLAMA_1M_COLS))
-        hrows = store.query_host_1m(host_id, t0, t1)
+        stride = max(1, window // 600)
+        series.update(_series_from_rows(store.query_llama_1m(host_id, t0, t1, stride), _LLAMA_1M_COLS))
+        hrows = store.query_host_1m(host_id, t0, t1, stride)
         series.update(_series_from_rows(hrows, _HOST_1M_COLS))
         series.update(_gpu_series(hrows, 7, _GPU_1M_KEYS))
     return {"window": window, "tier": tier, "series": series}

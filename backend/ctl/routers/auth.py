@@ -20,7 +20,14 @@ def _login_rate_limited(ip: str, username: str) -> bool:
     key = (ip or "?", (username or "").lower())
     now = time.time()
     if len(_login_attempts) > 1000:
-        _login_attempts.clear()
+        # 只清理已过期条目：整体 clear() 可被攻击者用大量不同 (IP,用户名) 触发，
+        # 从而冲掉正在生效的限流
+        expired = [k for k, (_, start) in _login_attempts.items()
+                   if now - start > _LOGIN_WINDOW_SEC]
+        for k in expired:
+            del _login_attempts[k]
+        if len(_login_attempts) > 1000:
+            _login_attempts.clear()  # 兜底（全部条目都在窗口内时）
     count, start = _login_attempts.get(key, (0, now))
     if now - start > _LOGIN_WINDOW_SEC:
         count, start = 0, now

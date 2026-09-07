@@ -15,15 +15,23 @@
 
     <div v-if="!llamaOnline && !sshOk" class="banner-danger">主机不可达（llama 离线 + SSH 断开）</div>
 
+    <!-- 平级 Tab：监控 / 服务（?tab=service 可深链） -->
+    <nav class="tabs">
+      <button :class="{ on: tab === 'monitor' }" @click="switchTab('monitor')">监控</button>
+      <button :class="{ on: tab === 'service' }" @click="switchTab('service')">服务</button>
+    </nav>
+
     <main class="content">
-      <!-- 首次加载骨架 -->
-      <template v-if="!snap">
+      <!-- ============ 监控 Tab ============ -->
+      <div v-show="tab === 'monitor'" class="tab-pane">
+        <!-- 首次加载骨架 -->
+        <template v-if="!snap">
         <div class="skeleton" style="height: 120px; margin-bottom: 16px"></div>
         <div class="skeleton" style="height: 200px; margin-bottom: 16px"></div>
         <div class="skeleton" style="height: 300px"></div>
-      </template>
+        </template>
 
-      <template v-else>
+        <template v-else>
         <!-- ============ 实时总览区 ============ -->
         <section>
           <div class="section-title">实时总览</div>
@@ -153,51 +161,25 @@
             <TrendChart title="负载均值" unit="load" :series="chartLoad" :height="170" />
           </div>
         </section>
-      </template>
+        </template>
+      </div>
 
-      <!-- ============ 服务管理（LlamaCtl 能力） ============ -->
-      <section class="ctl-scope">
-        <div class="section-title">服务管理</div>
-        <div class="ctl-toolbar">
-          <el-button type="primary" size="small" @click="newServiceVisible = true">
-            <el-icon style="margin-right:4px"><Plus /></el-icon>新建服务
-          </el-button>
-          <el-button size="small" :loading="ctlScanning" @click="ctlScan">
-            <el-icon style="margin-right:4px"><Refresh /></el-icon>扫描服务
-          </el-button>
-          <el-button size="small" @click="ctlRuleDialog = true">扫描规则</el-button>
-          <el-button size="small" @click="ctlLogsDrawer = true">操作日志</el-button>
-        </div>
-        <MetricsPanel :data="ctlMetrics" :error="ctlMetricsError" :services="ctlServices" :host-label="hostName" />
-        <el-empty v-if="!ctlServices.length" description="未扫描到匹配的服务，可检查【扫描规则】或【新建服务】" :image-size="60" />
-        <el-row :gutter="16" v-else>
-          <el-col :xs="24" :sm="12" :lg="8" :xl="6" v-for="s in ctlServices" :key="s.name">
-            <ServiceCard
-              :service="s"
-              :metrics="ctlMetrics ? ctlMetrics.services : null"
-              @action="onCtlAction"
-              @edit="openCtlConfig"
-              @restore="onCtlRestore"
-              @logs="openCtlLogs"
-              @duplicate="openCtlDup"
-            />
-          </el-col>
-        </el-row>
-        <ConfigDialog v-model="ctlConfigVisible" :service="ctlActiveService" @saved="ctlScan" />
-        <NewServiceDialog v-model="newServiceVisible" @created="ctlScan" />
-        <DuplicateServiceDialog v-model="ctlDupVisible" :service="ctlDupService" @created="ctlScan" />
-        <ServiceLogsDrawer v-model="ctlSvcLogsVisible" :service="ctlActiveService" :host-id="ctlDbId" />
-        <RuleEditor v-model="ctlRuleDialog" />
-        <LogsDrawer v-model="ctlLogsDrawer" />
-      </section>
+      <!-- ============ 服务 Tab（LlamaCtl 能力，独立组件） ============ -->
+      <ServiceTab
+        v-show="tab === 'service'"
+        :host-id="props.id"
+        :active="tab === 'service'"
+        :host-label="hostName"
+      />
     </main>
 
-    <div v-if="mode === 'paused'" class="paused-watermark"><span>已暂停</span></div>
+    <div v-if="mode === 'paused' && tab === 'monitor'" class="paused-watermark"><span>已暂停</span></div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api'
 import { useHostStream } from '../stream'
 import { totalSpeed as globalSpeed } from '../speed'
@@ -218,21 +200,21 @@ import ModelInfoCard from '../components/ModelInfoCard.vue'
 import SlotTable from '../components/SlotTable.vue'
 import TrendChart from '../components/TrendChart.vue'
 import EventFeed from '../components/EventFeed.vue'
-import http from '../api/client'
-import { useAuthStore } from '../stores/auth'
-import MetricsPanel from '../components/MetricsPanel.vue'
-import ServiceCard from '../components/ServiceCard.vue'
-import ConfigDialog from '../components/ConfigDialog.vue'
-import NewServiceDialog from '../components/NewServiceDialog.vue'
-import DuplicateServiceDialog from '../components/DuplicateServiceDialog.vue'
-import ServiceLogsDrawer from '../components/ServiceLogsDrawer.vue'
-import RuleEditor from '../components/RuleEditor.vue'
-import LogsDrawer from '../components/LogsDrawer.vue'
+import ServiceTab from '../components/ServiceTab.vue'
 
 const props = defineProps({ id: { type: String, required: true } })
 
 const { snapshot, connected, degraded, mode, setMode } = useHostStream(props.id)
 const snap = computed(() => snapshot.value)
+
+// ---------------- 平级 Tab：监控 / 服务 ----------------
+const route = useRoute()
+const router = useRouter()
+const tab = computed(() => (route.query.tab === 'service' ? 'service' : 'monitor'))
+function switchTab(t) {
+  if (t === tab.value) return
+  router.replace({ query: t === 'service' ? { tab: 'service' } : {} })
+}
 
 // ---------------- 基础字段 ----------------
 const hostName = computed(() => (snap.value ? snap.value.host.name : props.id))
@@ -561,97 +543,15 @@ const chartMtp = computed(() => {
 const sparkGen = computed(() => mapTail('gen_speed', (v) => v))
 const sparkPrompt = computed(() => mapTail('prompt_speed', (v) => v))
 
-// ---------------- 服务管理（LlamaCtl） ----------------
-const authStore = useAuthStore()
-const ctlDbId = ref(0)
-const ctlServices = ref([])
-const ctlMetrics = ref(null)
-const ctlMetricsError = ref('')
-const ctlScanning = ref(false)
-const ctlConfigVisible = ref(false)
-const newServiceVisible = ref(false)
-const ctlDupVisible = ref(false)
-const ctlDupService = ref(null)
-const ctlSvcLogsVisible = ref(false)
-const ctlActiveService = ref(null)
-const ctlRuleDialog = ref(false)
-const ctlLogsDrawer = ref(false)
-let ctlMetricsTimer = null
-
-async function ctlScan() {
-  if (!ctlDbId.value) return
-  ctlScanning.value = true
-  try {
-    ctlServices.value = await http.get('/services', { params: { host_id: ctlDbId.value } })
-  } catch (e) {
-    ctlServices.value = []
-  } finally {
-    ctlScanning.value = false
-  }
-}
-
-async function ctlPollMetrics() {
-  if (!ctlDbId.value) return
-  try {
-    ctlMetrics.value = await http.get('/metrics', { params: { host_id: ctlDbId.value } })
-    ctlMetricsError.value = ''
-  } catch (e) {
-    ctlMetricsError.value = String((e && e.message) || e)
-  }
-}
-
-async function onCtlAction(service, action) {
-  try {
-    await http.post(`/services/${encodeURIComponent(service.name)}/${action}`, null,
-      { params: { host_id: ctlDbId.value } })
-    ctlPollMetrics()
-  } catch (e) { /* client 已提示 */ }
-}
-
-function openCtlConfig(service) {
-  ctlActiveService.value = service
-  ctlConfigVisible.value = true
-}
-
-async function onCtlRestore(service) {
-  try {
-    await http.post(`/services/${encodeURIComponent(service.name)}/restore`, null,
-      { params: { host_id: ctlDbId.value } })
-    ctlScan()
-  } catch (e) { /* client 已提示 */ }
-}
-
-function openCtlLogs(service) {
-  ctlActiveService.value = service
-  ctlSvcLogsVisible.value = true
-}
-
-function openCtlDup(service) {
-  ctlDupService.value = service
-  ctlDupVisible.value = true
-}
-
-onMounted(async () => {
+onMounted(() => {
   loadHistory()
   histTimer = setInterval(loadHistory, 5000)
   document.addEventListener('visibilitychange', onVisibilityChange)
-  // 解析管理侧 db_id（统一列表 id=mid，db_id=整型主键）
-  try {
-    const hosts = await api.hosts()
-    const h = hosts.find((x) => x.id === props.id)
-    if (h && h.db_id) {
-      ctlDbId.value = h.db_id
-      authStore.setCurrentHost(h.db_id)
-      ctlScan()
-      ctlPollMetrics()
-      ctlMetricsTimer = setInterval(ctlPollMetrics, 5000)
-    }
-  } catch (e) { /* 无管理数据 */ }
 })
+
 watch(winS, loadHistory)
 onBeforeUnmount(() => {
   if (histTimer) clearInterval(histTimer)
-  if (ctlMetricsTimer) clearInterval(ctlMetricsTimer)
   document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 </script>
@@ -663,6 +563,35 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 22px;
 }
+.tabs {
+  position: sticky;
+  top: calc(var(--chrome-top, 0px) + 56px);
+  z-index: 19;
+  display: flex;
+  gap: 6px;
+  padding: 14px 24px 0;
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
+  backdrop-filter: blur(12px);
+}
+.tabs button {
+  padding: 8px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  cursor: pointer;
+  transition: color .15s, background .15s;
+}
+.tabs button:hover { color: var(--text); }
+.tabs button.on {
+  color: var(--cyan);
+  background: var(--card-bg);
+  border-color: var(--card-border);
+}
+.tab-pane { display: flex; flex-direction: column; gap: 22px; }
 .banner-danger {
   margin: 14px 24px 0;
   padding: 10px 16px;

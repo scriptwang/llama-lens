@@ -26,14 +26,57 @@
       <el-form-item label="可执行文件路径" required>
         <el-input v-model="form.executable" placeholder="/home/wx/llama.cpp/build/bin/llama-server">
           <template #prefix><el-icon><Monitor /></el-icon></template>
+          <template #append>
+            <el-button @click="openBrowse('executable')">
+              <el-icon style="margin-right: 4px"><Folder /></el-icon>浏览
+            </el-button>
+          </template>
         </el-input>
       </el-form-item>
-      <el-form-item label="启动参数（空格分隔，与命令行一致）">
+      <div class="form-grid">
+        <el-form-item label="模型文件（.gguf）">
+          <el-input v-model="form.model" placeholder="如 /share/models/Qwen3-27B-Q4_K_M.gguf">
+            <template #append>
+              <el-button @click="openBrowse('model')">
+                <el-icon style="margin-right: 4px"><Folder /></el-icon>浏览
+              </el-button>
+            </template>
+          </el-input>
+        </el-form-item>
+        <el-form-item label="mmproj 文件（视觉，可选）">
+          <el-input v-model="form.mmproj" placeholder="如 /share/models/Qwen3-27B-mmproj.gguf">
+            <template #append>
+              <el-button @click="openBrowse('mmproj')">
+                <el-icon style="margin-right: 4px"><Folder /></el-icon>浏览
+              </el-button>
+            </template>
+          </el-input>
+        </el-form-item>
+        <el-form-item label="Chat 模板（.jinja，可选）">
+          <el-input v-model="form.chatTemplate" placeholder="如 /share/templates/chat.jinja">
+            <template #append>
+              <el-button @click="openBrowse('chatTemplate')">
+                <el-icon style="margin-right: 4px"><Folder /></el-icon>浏览
+              </el-button>
+            </template>
+          </el-input>
+        </el-form-item>
+        <el-form-item label="LoRA 文件（.gguf，可选）">
+          <el-input v-model="form.lora" placeholder="如 /share/lora/xxx.gguf">
+            <template #append>
+              <el-button @click="openBrowse('lora')">
+                <el-icon style="margin-right: 4px"><Folder /></el-icon>浏览
+              </el-button>
+            </template>
+          </el-input>
+        </el-form-item>
+      </div>
+      <el-form-item label="其他启动参数（空格分隔，与命令行一致）">
         <el-input
           v-model="form.args"
           type="textarea"
           :rows="3"
-          placeholder="-m /path/to/model.gguf --n-gpu-layers 99 --ctx-size 8192 --port 8080 --host 0.0.0.0"
+          placeholder="--n-gpu-layers 99 --ctx-size 8192 --port 8080 --host 0.0.0.0"
         />
       </el-form-item>
       <div class="form-grid">
@@ -53,6 +96,16 @@
     <div class="preview-title">单元文件预览</div>
     <div class="preview-box">{{ preview }}</div>
 
+    <FileBrowser
+      v-if="browsing"
+      :host-id="store.currentHostId"
+      :roots="browseRoots"
+      :initial-path="browseInitialPath"
+      :initial-pattern="browsePattern"
+      @select="onBrowseSelect"
+      @close="browsing = false"
+    />
+
     <template #footer>
       <el-button @click="$emit('update:modelValue', false)">取消</el-button>
       <el-button type="primary" :loading="saving" @click="create">创建并 daemon-reload</el-button>
@@ -65,17 +118,58 @@ import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index.mjs'
 import http from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import FileBrowser from './FileBrowser.vue'
 
 const props = defineProps({ modelValue: Boolean })
 const emit = defineEmits(['update:modelValue', 'created'])
 const store = useAuthStore()
 const saving = ref(false)
+const browsing = ref(false)
+const browseTarget = ref('')
+
+const BROWSE_META = {
+  executable: { pattern: '' },
+  model: { pattern: '*.gguf' },
+  mmproj: { pattern: '*mmproj*' },
+  chatTemplate: { pattern: '*.jinja' },
+  lora: { pattern: '*.gguf' },
+}
+
+const browseRoots = computed(() => {
+  const roots = (store.currentHost?.browse_paths || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  return roots.length ? roots : ['/']
+})
+
+const browsePattern = computed(() => BROWSE_META[browseTarget.value]?.pattern || '')
+
+const browseInitialPath = computed(() => {
+  const s = (form[browseTarget.value] || '').replace(/\/+$/, '')
+  if (!s || s === '/') return '/'
+  return s.slice(0, s.lastIndexOf('/')) || '/'
+})
+
+function openBrowse(key) {
+  browseTarget.value = key
+  browsing.value = true
+}
+
+function onBrowseSelect(path) {
+  form[browseTarget.value] = path
+  browsing.value = false
+}
 
 const form = reactive({
   name: '',
   description: '',
   executable: '/home/wx/llama.cpp/build/bin/llama-server',
-  args: '-m /path/to/model.gguf --n-gpu-layers 99 --ctx-size 8192 --port 8080 --host 0.0.0.0',
+  model: '',
+  mmproj: '',
+  chatTemplate: '',
+  lora: '',
+  args: '--n-gpu-layers 99 --ctx-size 8192 --port 8080 --host 0.0.0.0',
   restart: 'no',
   enabled: false,
 })
@@ -100,7 +194,14 @@ const preview = computed(() => {
   lines.push('')
   lines.push('[Service]')
   lines.push('Type=simple')
-  const cmd = [form.executable, form.args.trim()].filter(Boolean).join(' ')
+  const q = (v) => (/\s/.test(v) ? `"${v}"` : v)
+  const fileArgs = [
+    form.model && `--model ${q(form.model)}`,
+    form.mmproj && `--mmproj ${q(form.mmproj)}`,
+    form.chatTemplate && `--chat-template ${q(form.chatTemplate)}`,
+    form.lora && `--lora ${q(form.lora)}`,
+  ].filter(Boolean)
+  const cmd = [form.executable, form.args.trim(), ...fileArgs].filter(Boolean).join(' ')
   lines.push(`ExecStart=${cmd}`)
   lines.push(`Restart=${form.restart}`)
   lines.push('')

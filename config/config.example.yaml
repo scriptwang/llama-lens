@@ -1,45 +1,41 @@
-# llama灵境 主机配置模板
-# 用法：cp config/hosts.example.yaml config/hosts.yaml 后填写。
-# config/hosts.yaml 与 .env 均含敏感信息，已被 .gitignore 排除，勿提交。
+# llama灵境 配置文件模板（唯一配置文件）
+# 用法：cp config/config.example.yaml config/config.yaml 后按需修改。
+# 主机管理在界面【主机管理】中维护（存 data/llama_ctl.db），本文件不放主机。
+# 每项均可用同名环境变量覆盖（环境变量 > 本文件 > 默认值），变量名见注释。
+# config/config.yaml 与 .env 均含敏感信息，已被 .gitignore 排除，勿提交。
+
+server:
+  port: 8000                 # 面板端口（env PORT）
+  # host: 0.0.0.0            # 监听地址（env LLAMACTL_HOST，面板固定 0.0.0.0）
+  data_dir: data             # 数据目录：主机库 + 监控历史 + 密钥（env LLAMACTL_DATA_DIR）
+  # db_path: data/llama_ctl.db   # 主机库路径（env LLAMACTL_DB_PATH）
+  auth_enabled: true         # 登录鉴权开关（env LLAMACTL_AUTH_ENABLED，不建议关闭）
+  admin_user: admin          # 管理员用户名（env LLAMACTL_ADMIN_USER）
+  # admin_password: xxx      # 初始管理员密码，仅首次启动（users 表为空）生效（env LLAMACTL_ADMIN_PASSWORD）
+  ssh_timeout: 10            # SSH 命令超时秒数（env LLAMACTL_SSH_TIMEOUT）
+  # jwt_secret: ""           # JWT 签名密钥；留空则用 data/jwt.secret 自动生成（env LLAMACTL_JWT_SECRET）
+  # fernet_key: ""           # 凭证加密密钥；留空则用 data/fernet.key 自动生成（env LLAMACTL_FERNET_KEY）
 
 global:
   push_interval: 1.0          # WS 推送间隔（秒）
   history:
     llama_points: 3600        # llama 序列环形缓冲点数（@1s，3600 = 1h）
     host_points: 1800         # host 序列环形缓冲点数（@2s，1800 = 1h）
+    # enabled: true           # 历史持久化开关（默认 true）
+    # raw_retention_days: 7   # 原始数据保留天数
+    # agg_retention_days: 90  # 1 分钟聚合数据保留天数
+    # events_retention_days: 30
   # thresholds:               # 全局阈值覆盖（可选，默认见 backend/config.py）
   #   gpu_util: {warn: 80, danger: 90}
   #   ctx: {warn: 80, danger: 90}
 
-hosts:
-  - id: ai
-    name: AI 主机 (ai.lan)
-    llama:
-      host: ai.lan            # llama-server 地址（支持 IPv6 字面量）
-      port: 8080
-      interval: 1.0           # /health + /slots 轮询间隔（秒）
-      slow_interval: 30.0     # /props + /v1/models 轮询间隔（秒）
-      timeout: 3.0
-    ssh:
-      host: ai.lan
-      port: 22
-      user: root
-      password: ${AI_SSH_PASS}    # 引用 .env 中的环境变量
-      # key_path: ~/.ssh/id_ed25519   # 密钥认证（可选，与 password 二选一）
-      interval: 2.0           # 批量只读命令间隔（秒）
-      keepalive: 15
-      timeout: 15.0
-    process:
-      name: llama-server      # 进程名（pgrep -x）
-    systemd_unit: llama-server.service
-    log:
-      source: journal         # journal（systemd unit）| file（日志文件，非 systemd 环境用）
-      unit: llama-server      # systemd unit 名（source=journal 时生效）
-      # path: /var/log/llama-server.log   # 日志文件路径（source=file 时必填）
-      follow: true            # 流式跟随；false 时改为 2s 周期拉取
-      catchup_sec: 30         # 重连后补拉秒数（file 模式重连补拉 200 行）
-    disk_mounts:              # 监控的挂载点（df 采集）
-      - /
-      - /share
-    # thresholds:             # 每主机阈值覆盖（可选）
-    #   mtp: {warn: 80, danger: 65}
+# hosts:                      # 可选：仅当数据库为空时一次性导入（老部署迁移用），导入后请删除
+#   - id: ai
+#     name: AI 主机
+#     llama: {host: 10.0.0.28, port: 8080, interval: 1.0, slow_interval: 30.0, timeout: 3.0}
+#     ssh: {host: 10.0.0.28, port: 22, user: root, password: ${AI_SSH_PASS},
+#           interval: 2.0, keepalive: 15, timeout: 15.0}
+#     process: {name: llama-server}
+#     systemd_unit: llama-server.service
+#     log: {source: journal, unit: llama-server, follow: true, catchup_sec: 30}
+#     disk_mounts: [/, /share]

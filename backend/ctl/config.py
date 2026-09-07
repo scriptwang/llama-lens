@@ -85,10 +85,21 @@ def _norm_scan_rules(sec) -> dict:
 YAML_SCAN_RULES = _norm_scan_rules(_scan)
 
 
+def _resolve_port() -> int:
+    """面板端口：LLAMACTL_PORT / PORT 环境变量 > config.yaml server.port > 8000。"""
+    for key in ("LLAMACTL_PORT", "PORT"):
+        v = os.environ.get(key)
+        if v:
+            return int(v)
+    if _server.get("port"):
+        return int(_server["port"])
+    return 8000
+
+
 @dataclass
 class Settings:
     host: str = str(_get("LLAMACTL_HOST", _server.get("host"), "0.0.0.0"))
-    port: int = int(_get("LLAMACTL_PORT", _server.get("port"), 8300))
+    port: int = _resolve_port()
     db_path: str = str(_get("LLAMACTL_DB_PATH", _server.get("db_path"), str(DATA_DIR / "llama_ctl.db")))
     ssh_timeout: int = int(_get("LLAMACTL_SSH_TIMEOUT", _server.get("ssh_timeout"), 10))
     auth_enabled: bool = str(_get("LLAMACTL_AUTH_ENABLED", _server.get("auth_enabled"), "true")).lower() != "false"
@@ -104,9 +115,14 @@ class Settings:
 
 
 settings = Settings()
-settings.jwt_secret = os.environ.get("LLAMACTL_JWT_SECRET") or _ensure_secret_file(
-    "jwt.secret", lambda: secrets.token_hex(32)
+# 密钥优先级：环境变量 > config.yaml server 段 > data/ 下自动生成（jwt.secret / fernet.key）
+settings.jwt_secret = (
+    os.environ.get("LLAMACTL_JWT_SECRET")
+    or str(_server.get("jwt_secret") or "")
+    or _ensure_secret_file("jwt.secret", lambda: secrets.token_hex(32))
 )
-settings.fernet_key = os.environ.get("LLAMACTL_FERNET_KEY") or _ensure_secret_file(
-    "fernet.key", lambda: base64.urlsafe_b64encode(secrets.token_bytes(32)).decode()
+settings.fernet_key = (
+    os.environ.get("LLAMACTL_FERNET_KEY")
+    or str(_server.get("fernet_key") or "")
+    or _ensure_secret_file("fernet.key", lambda: base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())
 )

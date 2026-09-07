@@ -27,7 +27,7 @@
       </el-table-column>
     </el-table>
     <el-empty v-if="!hosts.length" description="暂无主机，点击右上角「新建主机」添加" />
-    <div class="tip">提示：凭证以 Fernet 加密存储于本地 SQLite，接口永不回传明文。浏览路径用于可视化面板文件选择器的快捷目录（逗号分隔，如 /share,/models）。</div>
+    <div class="tip">提示：凭证以 Fernet 加密存储于本地 SQLite，接口永不回传明文。浏览路径是全站文件选择器（新建服务 / 可视化配置等）的快捷目录来源（逗号分隔，如 /share,/models；填 / 可浏览全部目录）。</div>
 
     <el-dialog v-model="showEdit" title="编辑主机" width="480px" append-to-body :teleported="false">
       <el-form label-position="top">
@@ -35,7 +35,7 @@
           <el-input v-model="editForm.alias" placeholder="可选" />
         </el-form-item>
         <el-form-item label="文件浏览快捷目录（逗号分隔）">
-          <el-input v-model="editForm.browse_paths" placeholder="如 /share,/models，用于模型 / mmproj 文件选择" />
+          <el-input v-model="editForm.browse_paths" placeholder="如 /share,/models；填 / 可浏览全部目录（所有文件选择器都从这里取快捷目录）" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -121,9 +121,9 @@ watch(
 )
 
 async function test(row) {
-  testingId.value = row.id
+  testingId.value = row.db_id
   try {
-    await http.post(`/hosts/${row.id}/test`)
+    await http.post(`/hosts/${row.db_id}/test`)
     ElMessage.success('连接正常')
   } finally {
     testingId.value = 0
@@ -131,7 +131,7 @@ async function test(row) {
 }
 
 function openEdit(row) {
-  editForm.id = row.id
+  editForm.id = row.db_id
   editForm.alias = row.alias || ''
   editForm.browse_paths = row.browse_paths || ''
   showEdit.value = true
@@ -202,7 +202,7 @@ async function submitCreate() {
 </script>
 
 <style scoped>
-.tip { margin-top: 12px; font-size: 12px; color: #909399; }
+.tip { margin-top: 12px; font-size: 12px; color: var(--lc-text-muted); }
 .toolbar { margin-bottom: 12px; display: flex; justify-content: flex-end; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
 .bp { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; color: var(--lc-text-secondary); word-break: break-all; }

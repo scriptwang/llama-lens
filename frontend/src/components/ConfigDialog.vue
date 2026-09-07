@@ -87,7 +87,7 @@ const help = ref({ help: '', version: '', executable: '' })
 const helpLoading = ref(false)
 const helpError = ref('')
 
-const browsePaths = computed(() => (store.currentHost && store.currentHost.browse_paths) || '')
+const browsePaths = computed(() => (store.currentHost && store.currentHost.browse_paths) || '/')
 
 // 参数字典是静态数据，模块级缓存（弹窗 destroy-on-close 后组件内缓存会丢失）
 let dictPromise = null

@@ -2,7 +2,7 @@
 # 用法：
 #   1. docker compose up -d --build
 #   2. 打开 http://<主机>:8000，用初始管理员账号登录（首次启动打印在日志里）
-#   3. 在界面【主机管理】中添加主机（老用户的 config/hosts.yaml 会在首次启动自动导入）
+#   3. 在界面【主机管理】中添加主机（老用户的 config/config.yaml 含 hosts 段时首次启动自动导入）
 #
 # 数据全部落在 ./data（SQLite 主机库 + 监控历史 + JWT/Fernet 密钥），持久化挂载即可：
 #   - 升级/重建容器不丢数据
@@ -19,9 +19,11 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
-      # 可选：老用户一次性导入主机配置（导入后 yaml 仅保留全局配置，可不再挂载）
-      # 注意：文件不存在时 docker 会把它创建成【目录】，确认存在再取消注释
-      # - ./config/hosts.yaml:/app/config/hosts.yaml:ro
+      # 全局配置（唯一配置文件；老用户可在其中保留 hosts 段做一次性导入）
+      # 注意：文件不存在时 docker 会把它创建成【目录】，确认存在再挂载
+      - ./config/config.yaml:/app/config/config.yaml:ro
+      # SSH 密码等环境变量（config.yaml 中以 ${VAR} 引用）
+      - ./.env:/app/.env:ro
       # 可选：SSH 密钥认证（key_path 指向容器内路径）
       # - ~/.ssh/id_ed25519:/secrets/id_ed25519:ro
     restart: unless-stopped

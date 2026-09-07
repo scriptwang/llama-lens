@@ -159,20 +159,28 @@ class HistoryStore:
         with self._lock:
             return self._conn.execute(sql, params).fetchall()
 
-    def query_llama_1m(self, host_id: str, t0: int, t1: int) -> List[Tuple]:
+    def query_llama_1m(self, host_id: str, t0: int, t1: int, stride: int = 1) -> List[Tuple]:
+        sql = ("SELECT ts, gen_avg, gen_max, prompt_avg, ctx_max, mtp_avg "
+               "FROM ts_llama_1m WHERE host_id=? AND ts BETWEEN ? AND ?")
+        params: List[Any] = [host_id, t0, t1]
+        if stride > 1:
+            sql += " AND ts % ? = 0"
+            params.append(stride)
+        sql += " ORDER BY ts"
         with self._lock:
-            return self._conn.execute(
-                "SELECT ts, gen_avg, gen_max, prompt_avg, ctx_max, mtp_avg "
-                "FROM ts_llama_1m WHERE host_id=? AND ts BETWEEN ? AND ? ORDER BY ts",
-                (host_id, t0, t1)).fetchall()
+            return self._conn.execute(sql, params).fetchall()
 
-    def query_host_1m(self, host_id: str, t0: int, t1: int) -> List[Tuple]:
+    def query_host_1m(self, host_id: str, t0: int, t1: int, stride: int = 1) -> List[Tuple]:
+        sql = ("SELECT ts, cpu_avg, mem_used_max, swap_used_max, net_rx_sum, "
+               "net_tx_sum, proc_cpu_avg, gpu "
+               "FROM ts_host_1m WHERE host_id=? AND ts BETWEEN ? AND ?")
+        params = [host_id, t0, t1]
+        if stride > 1:
+            sql += " AND ts % ? = 0"
+            params.append(stride)
+        sql += " ORDER BY ts"
         with self._lock:
-            return self._conn.execute(
-                "SELECT ts, cpu_avg, mem_used_max, swap_used_max, net_rx_sum, "
-                "net_tx_sum, proc_cpu_avg, gpu "
-                "FROM ts_host_1m WHERE host_id=? AND ts BETWEEN ? AND ? ORDER BY ts",
-                (host_id, t0, t1)).fetchall()
+            return self._conn.execute(sql, params).fetchall()
 
     def query_events(self, host_id: str, limit: int = 200) -> List[Dict[str, Any]]:
         with self._lock:

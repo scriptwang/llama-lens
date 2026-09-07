@@ -1,4 +1,5 @@
 import json
+import re
 import stat
 from datetime import datetime, timezone
 from fnmatch import fnmatch
@@ -6,14 +7,44 @@ from fnmatch import fnmatch
 from fastapi import APIRouter, Depends, Request
 
 from .. import database as db
-from ..errors import ApiError, VALIDATION_FAILED, ok
-from ..hostsync import MONITOR_FIELDS, apply_monitor, gen_mid
+from ..errors import ApiError, VALIDATION_FAILED, ok, validate_unit_name
+from ..hostsync import MONITOR_FIELDS, apply_monitor, apply_monitor_async, gen_mid
 from .auth import get_current_user
 from ..schemas import HostConnectReq, HostUpdateReq
 from ..security import decrypt_secret, encrypt_secret
 from ..ssh_pool import pool, run
 
 router = APIRouter(prefix="/api/hosts", tags=["hosts"])
+
+# ---------------------------------------------------------------------------
+# 主机配置字段校验
+# 这些字段会被拼进在被监控主机上执行的 shell 命令（BATCH_CMD / 日志跟随），
+# 必须白名单限制，防止命令注入（服务名另有 validate_unit_name 校验）
+# ---------------------------------------------------------------------------
+SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")      # 进程名
+UNIT_REF_RE = re.compile(r"^[A-Za-z0-9._@-]+$")      # unit 名（可不含 .service 后缀）
+SAFE_PATH_RE = re.compile(r"^/[A-Za-z0-9._/-]+$")    # 日志文件绝对路径
+SAFE_MOUNT_RE = re.compile(r"^/[A-Za-z0-9._-]*$")    # 挂载点
+
+
+def validate_monitor_fields(systemd_unit, process_name, log_source, log_unit,
+                            log_path, disk_mounts) -> None:
+    """校验监控相关字段的最终取值（写入 DB 前调用）。"""
+    if systemd_unit:
+        validate_unit_name(systemd_unit)
+    if not SAFE_NAME_RE.match(process_name or ""):
+        raise ApiError(VALIDATION_FAILED, "进程名仅允许字母数字 . _ -")
+    if log_source not in ("journal", "file"):
+        raise ApiError(VALIDATION_FAILED, "log_source 必须是 journal 或 file")
+    if log_unit and not UNIT_REF_RE.match(log_unit):
+        raise ApiError(VALIDATION_FAILED, "日志 unit 名仅允许字母数字 . _ - @")
+    if log_path and not SAFE_PATH_RE.match(log_path):
+        raise ApiError(VALIDATION_FAILED, "日志路径必须是绝对路径，仅允许字母数字 . _ / -")
+    if log_source == "file" and not log_path:
+        raise ApiError(VALIDATION_FAILED, "log_source=file 时必须配置 log_path")
+    for m in disk_mounts or []:
+        if not SAFE_MOUNT_RE.match(str(m)):
+            raise ApiError(VALIDATION_FAILED, "非法挂载点：%s" % m)
 
 
 def _now() -> str:
@@ -66,6 +97,9 @@ def connect(req: HostConnectReq, request: Request, user: str = Depends(get_curre
         raise ApiError(VALIDATION_FAILED, "密码不能为空")
     if req.auth_type == "key" and not req.key_data:
         raise ApiError(VALIDATION_FAILED, "私钥内容不能为空")
+    validate_monitor_fields(req.systemd_unit, req.process_name, req.log_source,
+                            req.log_unit, req.log_path, req.disk_mounts)
+    unit = req.systemd_unit or "llama-server.service"
 
     test_row = {
         "id": 0,
@@ -95,7 +129,7 @@ def connect(req: HostConnectReq, request: Request, user: str = Depends(get_curre
         req.llama_host or req.host, req.llama_port, req.llama_interval,
         req.llama_slow_interval, req.llama_timeout,
         req.ssh_interval, req.ssh_keepalive, req.ssh_timeout,
-        req.key_path, req.process_name, req.systemd_unit,
+        req.key_path, req.process_name, unit,
         req.log_source, req.log_unit, req.log_path,
         1 if req.log_follow else 0, req.log_catchup_sec,
         json.dumps(req.disk_mounts) if req.disk_mounts else '["/"]',
@@ -115,6 +149,7 @@ def connect(req: HostConnectReq, request: Request, user: str = Depends(get_curre
         )
         host_id = existing["id"]
         action = "restart"
+        pool.close_host(host_id)  # 凭证已变更：失效管理侧连接池缓存
     else:
         mid = req.mid or gen_mid(req.alias, req.host)
         cur = db.execute(
@@ -196,9 +231,10 @@ def list_fs(host_id: int, path: str = "/", pattern: str = "", user: str = Depend
         entries = []
         for a in attrs:
             name = a.filename
-            if pattern and not fnmatch(name, pattern):
-                continue
             is_dir = stat.S_ISDIR(a.st_mode)
+            # 过滤只作用于文件；目录始终显示（否则带过滤时无法导航）
+            if pattern and not is_dir and not fnmatch(name, pattern):
+                continue
             child = (base + "/" + name) if base else ("/" + name)
             entries.append({"name": name, "path": child, "is_dir": is_dir, "size": a.st_size or 0})
         entries.sort(key=lambda e: (not e["is_dir"], e["name"].lower()))
@@ -209,8 +245,19 @@ def list_fs(host_id: int, path: str = "/", pattern: str = "", user: str = Depend
 
 
 @router.put("/{host_id}")
-def update_host(host_id: int, req: HostUpdateReq, request: Request, user: str = Depends(get_current_user)):
-    get_host_row(host_id)
+async def update_host(host_id: int, req: HostUpdateReq, request: Request, user: str = Depends(get_current_user)):
+    row0 = get_host_row(host_id)
+    # 校验"更新后最终状态"（变更字段 + 现有值合并），防命令注入
+    validate_monitor_fields(
+        req.systemd_unit if req.systemd_unit is not None else row0["systemd_unit"],
+        req.process_name if req.process_name is not None else row0["process_name"],
+        req.log_source if req.log_source is not None else row0["log_source"],
+        req.log_unit if req.log_unit is not None else row0["log_unit"],
+        req.log_path if req.log_path is not None else row0["log_path"],
+        req.disk_mounts if req.disk_mounts is not None else json.loads(row0["disk_mounts"] or "[]"),
+    )
+    if req.systemd_unit == "":
+        req.systemd_unit = "llama-server.service"
     fields, params = [], []
     if req.alias is not None:
         fields.append("alias = ?")
@@ -236,7 +283,7 @@ def update_host(host_id: int, req: HostUpdateReq, request: Request, user: str = 
     db.log_action(host_id, user, "update_host", "", "更新主机配置", request.client.host if request.client else "")
     if mon_changed:
         row = db.query_one("SELECT * FROM hosts WHERE id = ?", (host_id,))
-        apply_monitor(request, "restart", row)
+        await apply_monitor_async(request, "restart", row)
     return ok({"updated": host_id})
 
 
@@ -254,9 +301,9 @@ def test_host(host_id: int, request: Request, user: str = Depends(get_current_us
 
 
 @router.delete("/{host_id}")
-def delete_host(host_id: int, request: Request, user: str = Depends(get_current_user)):
+async def delete_host(host_id: int, request: Request, user: str = Depends(get_current_user)):
     row = get_host_row(host_id)
-    apply_monitor(request, "stop", row)
+    await apply_monitor_async(request, "stop", row)
     pool.close_host(host_id)
     db.log_action(
         host_id, user, "delete_host", "",

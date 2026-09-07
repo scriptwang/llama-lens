@@ -6,8 +6,10 @@
 - 兼容 Python 3.9。
 """
 import asyncio
+import io
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 import paramiko
@@ -18,6 +20,21 @@ from ..events import EventDetector
 log = logging.getLogger("llamalens.ssh")
 
 MAX_BACKOFF = 30.0
+
+# SSH 专用线程池：paramiko 阻塞调用不占用 asyncio 默认池。
+# 默认池上限 min(32, cpu+4)，主机多或远端慢（15s 超时）时容易耗尽，
+# 连带日志流打开、其他主机采集一起排队；专用池隔离故障域。
+SSH_EXECUTOR = ThreadPoolExecutor(max_workers=32, thread_name_prefix="ssh")
+
+
+def _load_pkey(key_data: str, passphrase: Optional[str]):
+    """从私钥内容加载 paramiko PKey（支持 OpenSSH/PEM 格式 RSA/ED25519/ECDSA）。"""
+    for cls in (paramiko.Ed25519Key, paramiko.RSAKey, paramiko.ECDSAKey, paramiko.DSSKey):
+        try:
+            return cls.from_private_key(io.StringIO(key_data), password=passphrase or None)
+        except Exception:
+            continue
+    raise ValueError("无法解析私钥（支持 OpenSSH/PEM 格式 RSA/ED25519/ECDSA）")
 
 
 class SshConnection:
@@ -45,7 +62,9 @@ class SshConnection:
             allow_agent=False,
             look_for_keys=False,
         )
-        if self.cfg.key_path:
+        if self.cfg.key_data:
+            kwargs["pkey"] = _load_pkey(self.cfg.key_data, self.cfg.key_passphrase)
+        elif self.cfg.key_path:
             kwargs["key_filename"] = self.cfg.key_path
         if self.cfg.password:
             kwargs["password"] = self.cfg.password
@@ -93,7 +112,7 @@ class SshConnection:
             # 需要（重）连接
             try:
                 client = await asyncio.get_running_loop().run_in_executor(
-                    None, self._connect_sync)
+                    SSH_EXECUTOR, self._connect_sync)
                 self.client = client
                 self.connected = True
                 self._backoff = 1.0
@@ -133,7 +152,7 @@ class SshConnection:
             return out
 
         try:
-            out = await asyncio.get_running_loop().run_in_executor(None, _run)
+            out = await asyncio.get_running_loop().run_in_executor(SSH_EXECUTOR, _run)
             self._fail_streak = 0
             return out
         except Exception as e:

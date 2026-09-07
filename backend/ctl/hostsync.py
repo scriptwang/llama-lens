@@ -1,4 +1,4 @@
-"""主机数据桥接：SQLite 行 ↔ 监控 HostConfig，hosts.yaml 导入，监控生命周期调度。
+"""主机数据桥接：SQLite 行 ↔ 监控 HostConfig，配置文件一次性导入（可选），监控生命周期调度。
 
 - mid：监控侧字符串主机 ID（WS/监控 API/前端路由用），管理侧用整型主键。
 - 监控生命周期通过 app.state.loop 调度到事件循环（CRUD 路由运行在线程池）。
@@ -47,15 +47,22 @@ def gen_mid(alias: str, host: str, taken: Optional[set] = None) -> str:
 def row_to_host_config(row, global_thresholds: Optional[dict] = None) -> HostConfig:
     """把 hosts 表行解密并组装为监控 HostConfig。"""
     if row["auth_type"] == "key":
+        # 密钥认证：监控侧直接复用 UI 录入的私钥内容（key_data 加密存于 encrypted_pwd）
         password = None
+        key_data = decrypt_secret(row["encrypted_pwd"]) if row["encrypted_pwd"] else None
+        key_pass = decrypt_secret(row["key_passphrase_enc"]) if row["key_passphrase_enc"] else None
     else:
         password = decrypt_secret(row["encrypted_pwd"]) if row["encrypted_pwd"] else None
+        key_data = None
+        key_pass = None
     ssh = SshCfg(
         host=row["host"],
         port=int(row["port"]),
         user=row["username"],
         password=password,
         key_path=row["key_path"] or None,
+        key_data=key_data,
+        key_passphrase=key_pass,
         interval=float(row["ssh_interval"]),
         keepalive=int(row["ssh_keepalive"]),
         timeout=float(row["ssh_timeout"]),
@@ -90,7 +97,7 @@ def row_to_host_config(row, global_thresholds: Optional[dict] = None) -> HostCon
         process_name=row["process_name"],
         log=log_cfg,
         disk_mounts=list(mounts),
-        systemd_unit=row["systemd_unit"],
+        systemd_unit=row["systemd_unit"] or "llama-server.service",
         thresholds=merge_thresholds(global_thresholds, host_t),
     )
 
@@ -107,7 +114,7 @@ def load_hosts_from_db(global_cfg) -> List[HostConfig]:
 
 
 def import_from_yaml_if_empty(app_cfg) -> int:
-    """DB 为空且 hosts.yaml 有主机时一次性导入（凭证 Fernet 加密入库）。"""
+    """DB 为空且配置文件含 hosts 段时一次性导入（凭证 Fernet 加密入库）。"""
     count = db.query_one("SELECT COUNT(*) AS c FROM hosts")["c"]
     if count > 0 or not app_cfg.hosts:
         return 0
@@ -137,9 +144,9 @@ def import_from_yaml_if_empty(app_cfg) -> int:
             ),
         )
         db.log_action(cur.lastrowid, "system", "import_yaml", "",
-                      "从 config/hosts.yaml 导入", "")
+                      "从配置文件导入", "")
         n += 1
-    log.info("已从 config/hosts.yaml 导入 %d 台主机到数据库", n)
+    log.info("已从配置文件导入 %d 台主机到数据库", n)
     return n
 
 
@@ -155,21 +162,36 @@ def _loop(request):
     return getattr(request.app.state, "loop", None)
 
 
-def apply_monitor(request, action: str, row) -> None:
-    """按 DB 行状态同步监控：start / restart / stop。
+def _monitor_coro(reg, action: str, row):
+    """按 DB 行状态构造监控生命周期协程：start / restart / stop。"""
+    if action in ("start", "restart") and row["monitor_enabled"]:
+        cfg = row_to_host_config(row, reg.app_cfg.global_cfg.thresholds)
+        return reg.add_host(cfg) if action == "start" else reg.restart_host(cfg)
+    return reg.remove_host(row["mid"])
 
-    在 CRUD 路由（线程池）中调用；失败只记日志，不影响管理操作结果。
+
+async def apply_monitor_async(request, action: str, row) -> None:
+    """async 版：直接 await 监控生命周期（供 async 路由使用，不阻塞线程池）。
+
+    失败只记日志，不影响管理操作结果。
     """
+    reg = _registry(request)
+    if reg is None:
+        return  # 独立 ctl 模式（无监控）
+    mid = row["mid"]
+    try:
+        await _monitor_coro(reg, action, row)
+    except Exception:
+        log.exception("主机 %s 监控生命周期操作失败（action=%s）", mid, action)
+
+
+def apply_monitor(request, action: str, row) -> None:
+    """同步版：在 CRUD 路由（线程池）中调度到事件循环；失败只记日志。"""
     reg, loop = _registry(request), _loop(request)
     if reg is None or loop is None:
         return  # 独立 ctl 模式（无监控）
     mid = row["mid"]
     try:
-        if action in ("start", "restart") and row["monitor_enabled"]:
-            cfg = row_to_host_config(row, reg.app_cfg.global_cfg.thresholds)
-            coro = reg.add_host(cfg) if action == "start" else reg.restart_host(cfg)
-        else:
-            coro = reg.remove_host(mid)
-        asyncio.run_coroutine_threadsafe(coro, loop).result(timeout=30)
+        asyncio.run_coroutine_threadsafe(_monitor_coro(reg, action, row), loop).result(timeout=30)
     except Exception:
         log.exception("主机 %s 监控生命周期操作失败（action=%s）", mid, action)

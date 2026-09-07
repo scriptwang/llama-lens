@@ -18,7 +18,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 
 from .api import router as api_router
-from .config import load_config
+from .config import AppConfig, GlobalConfig, load_config
 from .ctl.errors import ApiError, api_error_handler
 from .ctl.hostsync import import_from_yaml_if_empty, load_hosts_from_db
 from .ctl.main import ctl_routers, init_ctl, shutdown_ctl
@@ -86,52 +86,60 @@ def setup_logging(base_dir: str) -> None:
 
 
 def create_app(base_dir: Optional[str] = None) -> FastAPI:
+    """创建 FastAPI 应用（轻量：不加载配置 / 不初始化 DB / 不启动监控）。
+
+    重初始化（配置加载、主机导入、历史存储、监控注册）全部延迟到 lifespan，
+    import 本模块无副作用，便于单元测试与多实例创建。
+    """
     base_dir = base_dir or BASE_DIR
     setup_logging(base_dir)
-
-    try:
-        app_cfg = load_config(base_dir)
-    except FileNotFoundError:
-        log.warning("config/hosts.yaml 不存在，使用默认全局配置（主机列表以数据库为准）")
-        from .config import AppConfig, GlobalConfig
-        app_cfg = AppConfig(global_cfg=GlobalConfig(), hosts=[])
-
-    # 主机统一存数据库：初始化 → 首次从 hosts.yaml 导入 → 从 DB 加载
-    init_ctl()
-    imported = import_from_yaml_if_empty(app_cfg)
-    if imported:
-        log.info("已从 config/hosts.yaml 导入 %d 台主机（主机管理已迁移到界面，yaml 仅保留全局配置）", imported)
-    app_cfg.hosts = load_hosts_from_db(app_cfg.global_cfg)
-
-    # 历史持久化（SQLite 两级存储；enabled=false 时退回纯内存）
-    history_store = None
-    history_writer = None
-    if app_cfg.global_cfg.history_enabled:
-        db_path = app_cfg.global_cfg.history_db_path
-        if not os.path.isabs(db_path):
-            db_path = os.path.join(base_dir, db_path)
-        try:
-            history_store = HistoryStore(db_path)
-            history_writer = HistoryWriter(
-                history_store,
-                flush_interval=app_cfg.global_cfg.history_flush_interval,
-                raw_days=app_cfg.global_cfg.history_raw_days,
-                agg_days=app_cfg.global_cfg.history_agg_days,
-                events_days=app_cfg.global_cfg.history_events_days,
-            )
-            log.info("历史存储已启用: %s（原始 %dd / 聚合 %dd / 事件 %dd）",
-                     db_path, app_cfg.global_cfg.history_raw_days,
-                     app_cfg.global_cfg.history_agg_days,
-                     app_cfg.global_cfg.history_events_days)
-        except Exception:
-            log.exception("历史存储初始化失败，退回纯内存模式")
-            history_store, history_writer = None, None
-
-    registry = MonitorRegistry(app_cfg, history_writer)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.loop = asyncio.get_running_loop()
+
+        # 配置加载（config.yaml 缺失时用默认全局配置；主机列表以数据库为准）
+        try:
+            app_cfg = load_config(base_dir)
+        except FileNotFoundError:
+            log.warning("config/config.yaml 不存在，使用默认全局配置（主机列表以数据库为准）")
+            app_cfg = AppConfig(global_cfg=GlobalConfig(), hosts=[])
+
+        # 主机统一存数据库：初始化 → 首次从配置文件导入（可选）→ 从 DB 加载
+        init_ctl()
+        imported = import_from_yaml_if_empty(app_cfg)
+        if imported:
+            log.info("已从配置文件一次性导入 %d 台主机（主机管理在界面维护）", imported)
+        app_cfg.hosts = load_hosts_from_db(app_cfg.global_cfg)
+
+        # 历史持久化（SQLite 两级存储；enabled=false 时退回纯内存）
+        history_store = None
+        history_writer = None
+        if app_cfg.global_cfg.history_enabled:
+            db_path = app_cfg.global_cfg.history_db_path
+            if not os.path.isabs(db_path):
+                db_path = os.path.join(base_dir, db_path)
+            try:
+                history_store = HistoryStore(db_path)
+                history_writer = HistoryWriter(
+                    history_store,
+                    flush_interval=app_cfg.global_cfg.history_flush_interval,
+                    raw_days=app_cfg.global_cfg.history_raw_days,
+                    agg_days=app_cfg.global_cfg.history_agg_days,
+                    events_days=app_cfg.global_cfg.history_events_days,
+                )
+                log.info("历史存储已启用: %s（原始 %dd / 聚合 %dd / 事件 %dd）",
+                         db_path, app_cfg.global_cfg.history_raw_days,
+                         app_cfg.global_cfg.history_agg_days,
+                         app_cfg.global_cfg.history_events_days)
+            except Exception:
+                log.exception("历史存储初始化失败，退回纯内存模式")
+                history_store, history_writer = None, None
+
+        registry = MonitorRegistry(app_cfg, history_writer)
+        app.state.registry = registry
+        app.state.history = history_store
+
         log.info("llama灵境 启动：端口 %d，主机 %s", app_cfg.port,
                  [h.id for h in app_cfg.hosts] or "(无)")
         await registry.start()
@@ -147,8 +155,6 @@ def create_app(base_dir: Optional[str] = None) -> FastAPI:
             log.info("llama灵境 已停止")
 
     app = FastAPI(title="llama灵境", lifespan=lifespan)
-    app.state.registry = registry
-    app.state.history = history_store
     app.include_router(api_router)
     app.include_router(ws_router)
     for r in ctl_routers:
@@ -166,10 +172,15 @@ def create_app(base_dir: Optional[str] = None) -> FastAPI:
             candidate = os.path.realpath(os.path.join(dist, full_path))
             # 防路径穿越：只允许服务 dist 目录内的文件
             if candidate.startswith(dist_real + os.sep) and os.path.isfile(candidate):
-                return FileResponse(candidate)
+                headers = None
+                if full_path.startswith("assets/"):
+                    # 带 hash 的构建产物可长期缓存
+                    headers = {"Cache-Control": "public, max-age=31536000, immutable"}
+                return FileResponse(candidate, headers=headers)
         index = os.path.join(dist, "index.html")
         if os.path.isfile(index):
-            return FileResponse(index)
+            # index.html 禁止缓存：否则新部署后浏览器仍引用旧 JS（改完不生效）
+            return FileResponse(index, headers={"Cache-Control": "no-cache"})
         from fastapi.responses import PlainTextResponse
         return PlainTextResponse(
             "前端尚未构建：cd frontend && npm install && npm run build（或运行 ./run.sh）")

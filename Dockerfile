@@ -12,8 +12,7 @@ RUN npm run build
 
 # ---- 阶段 2：后端运行时（代码兼容 Python 3.9+，镜像用 3.11 slim）----
 FROM python:3.11-slim
-ENV PYTHONUNBUFFERED=1 \
-    PORT=8000
+ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
@@ -22,7 +21,7 @@ COPY --from=frontend /build/dist ./frontend/dist
 RUN mkdir -p config logs data
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import os,urllib.request;urllib.request.urlopen('http://127.0.0.1:%s/api/health' % os.environ.get('PORT','8000'), timeout=4)" || exit 1
-# shell 形式以支持 ${PORT} 展开；exec 使 uvicorn 直接成为 PID 1 接收 SIGTERM
-# （否则 dash 作为 PID 1 只等待子进程、不转发信号，优雅关闭永远不会触发）
-CMD ["sh", "-c", "exec uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000} --timeout-graceful-shutdown 10"]
+    CMD python -c "import urllib.request; from backend.config import resolve_port; urllib.request.urlopen('http://127.0.0.1:%s/api/health' % resolve_port(), timeout=4)" || exit 1
+# 端口：环境变量 PORT > config.yaml server.port > 8000（启动时解析）
+# shell 形式 + exec 使 uvicorn 直接成为 PID 1 接收 SIGTERM（优雅关闭）
+CMD ["sh", "-c", "exec uvicorn backend.main:app --host 0.0.0.0 --port $(python -c 'from backend.config import resolve_port; print(resolve_port())') --timeout-graceful-shutdown 10"]

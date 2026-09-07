@@ -2,6 +2,7 @@
 .git
 .gitignore
 .env
+config/config.yaml
 config/hosts.yaml
 
 # 前端依赖与构建产物（镜像内重新构建）

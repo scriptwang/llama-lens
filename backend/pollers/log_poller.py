@@ -9,6 +9,7 @@
 import asyncio
 import logging
 import re
+import shlex
 import threading
 import time
 from datetime import datetime
@@ -17,6 +18,7 @@ from typing import Any, Dict, Optional
 from ..config import HostConfig
 from ..events import EventDetector
 from ..store import RingBuffer
+from .ssh_conn import SSH_EXECUTOR
 
 log = logging.getLogger("llamalens.logpoller")
 
@@ -188,9 +190,9 @@ class LogPoller:
         """
         cfg = self.cfg.log
         if cfg.source == "file":
-            cmd = BOOT_BLOCK_CMD_FILE.format(path=cfg.path or "")
+            cmd = BOOT_BLOCK_CMD_FILE.format(path=shlex.quote(cfg.path or ""))
         else:
-            cmd = BOOT_BLOCK_CMD.format(unit=cfg.unit)
+            cmd = BOOT_BLOCK_CMD.format(unit=shlex.quote(cfg.unit))
         out = await self.ssh.exec_command(cmd)
         if out is None:
             return
@@ -202,12 +204,12 @@ class LogPoller:
         """按日志源（journal | file）构造流式跟随命令。"""
         cfg = self.cfg.log
         if cfg.source == "file":
-            path = cfg.path or ""
+            path = shlex.quote(cfg.path or "")
             if self._last_line_ts is not None:
                 # 重连后补拉最近 200 行防丢行
                 return "tail -n 200 -F %s" % path
             return "tail -n 0 -F %s" % path
-        unit = cfg.unit
+        unit = shlex.quote(cfg.unit)
         if self._last_line_ts is not None:
             since = int(time.time()) - cfg.catchup_sec
             return "journalctl -u %s -o short-iso --no-pager --since '@%d' -f" % (unit, since)
@@ -224,7 +226,7 @@ class LogPoller:
             return self.ssh.open_stream(cmd)
 
         try:
-            stdout = await loop.run_in_executor(None, _open)
+            stdout = await loop.run_in_executor(SSH_EXECUTOR, _open)
         except Exception as e:
             log.warning("[%s] 日志流打开失败: %s", self.cfg.id, e)
             self.ssh._drop()
@@ -291,7 +293,7 @@ class LogPoller:
 
     async def _poll_file_once(self) -> None:
         """file 模式周期拉取：按字节偏移读新增内容（处理轮转/截断）。"""
-        path = self.cfg.log.path or ""
+        path = shlex.quote(self.cfg.log.path or "")
         size_out = await self.ssh.exec_command(
             "stat -c %%s %s 2>/dev/null || echo 0" % path)
         if size_out is None:

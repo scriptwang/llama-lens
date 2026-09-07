@@ -8,6 +8,7 @@
 import asyncio
 import logging
 import re
+import shlex
 import time
 from typing import Optional, Dict, Any, List
 
@@ -43,7 +44,7 @@ awk '$3 ~ /^(sd|vd|nvme)/ && $3 !~ /p[0-9]+$/ && $3 !~ /^[sv]d[a-z]+[0-9]+$/ {{p
 echo ==DF==
 df -B1 --output=source,target,size,used,avail,pcent {df_mounts} 2>/dev/null
 echo ==PROC==
-PID=$(pgrep -x "{process_name}" | head -1)
+PID=$(pgrep -x {process_name} | head -1)
 if [ -z "$PID" ]; then
   # comm 被内核截断到 15 字符：长进程名回退 cmdline argv[0] basename 匹配
   # （不用 basename 命令：argv[0] 可能以 - 开头[如 -zsh]会被当选项解析）
@@ -507,10 +508,11 @@ class SshPoller:
 
     def _build_batch_cmd(self) -> str:
         mounts = self.cfg.disk_mounts or ["/"]
+        # 参数全部 shlex.quote：即使配置被绕过校验写入脏值，也无法注入命令
         return BATCH_CMD.format(
-            process_name=self.cfg.process_name,
-            systemd_unit=self.cfg.systemd_unit,
-            df_mounts=" ".join(mounts),
+            process_name=shlex.quote(self.cfg.process_name),
+            systemd_unit=shlex.quote(self.cfg.systemd_unit),
+            df_mounts=" ".join(shlex.quote(m) for m in mounts),
         )
 
     async def _collect_static(self) -> None:

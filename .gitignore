@@ -1,6 +1,7 @@
 # 凭证与主机拓扑（含敏感信息）
 .env
 config/hosts.yaml
+config/config.yaml
 
 # Python
 __pycache__/

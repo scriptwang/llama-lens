@@ -44,6 +44,9 @@
       </el-table-column>
     </el-table>
     <div class="fb-selected" v-if="selected && !selected.is_dir">已选：{{ selected.path }}</div>
+    <div v-else-if="!loading && !entries.length && pattern" class="fb-selected fb-hint">
+      当前目录没有匹配「{{ pattern }}」的文件：可清除过滤，或进入子目录继续找
+    </div>
     <div v-else class="fb-selected fb-hint">提示：单击选中文件，双击进入目录</div>
     <template #footer>
       <el-button @click="$emit('close')">取消</el-button>
@@ -60,11 +63,12 @@ const props = defineProps({
   hostId: { type: Number, required: true },
   roots: { type: Array, default: () => [] },
   initialPath: { type: String, default: '' },
+  initialPattern: { type: String, default: '' },
 })
 const emit = defineEmits(['select', 'close'])
 
 const pathInput = ref('/')
-const pattern = ref('')
+const pattern = ref(props.initialPattern || '')
 const entries = ref([])
 const parent = ref('/')
 const selected = ref(null)
@@ -93,6 +97,13 @@ async function load() {
     pathInput.value = data.path
   } catch (e) {
     entries.value = []
+    // 路径可能是文件（或不存在）：自动回退到上级目录重试
+    const p = (pathInput.value || '').replace(/\/+$/, '')
+    const par = p === '/' ? '' : (p.split('/').slice(0, -1).join('/') || '/')
+    if (par && par !== p) {
+      pathInput.value = par
+      load()
+    }
   } finally {
     loading.value = false
   }

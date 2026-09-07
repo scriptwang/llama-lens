@@ -1,4 +1,4 @@
-"""配置加载：hosts.yaml + .env。
+"""配置加载：config.yaml（旧名 hosts.yaml 兼容）+ .env。
 
 - 凭证：SSH 支持密钥认证（key_path）与密码认证（password / ${ENV} 引用）两种方式。
 - 阈值：全局默认 + 每主机覆盖，加载时合并为每主机一份完整阈值表。
@@ -96,6 +96,8 @@ class SshCfg:
     user: str = "root"
     password: Optional[str] = None
     key_path: Optional[str] = None
+    key_data: Optional[str] = None        # 私钥内容（界面添加的主机，加密存库后解密注入）
+    key_passphrase: Optional[str] = None  # 私钥口令（可选）
     interval: float = 2.0        # 批量采集间隔（秒）
     keepalive: int = 15          # SSH keepalive（秒）
     timeout: float = 15.0        # 单条命令超时
@@ -214,15 +216,54 @@ def _build_host(d: dict, global_t: dict) -> HostConfig:
     )
 
 
+def _config_file_path(base_dir: str) -> Optional[str]:
+    """config.yaml 优先，回退旧名 hosts.yaml；都不存在返回 None。"""
+    for name in ("config.yaml", "hosts.yaml"):
+        path = os.path.join(base_dir, "config", name)
+        if os.path.exists(path):
+            return path
+    return None
+
+
+def _read_server_section(base_dir: str) -> dict:
+    path = _config_file_path(base_dir)
+    if not path:
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+        sec = raw.get("server")
+        return sec if isinstance(sec, dict) else {}
+    except Exception:
+        return {}
+
+
+def resolve_port(base_dir: Optional[str] = None) -> int:
+    """面板端口：环境变量 PORT > config.yaml server.port > 8000。"""
+    env = os.environ.get("PORT")
+    if env:
+        return int(env)
+    base_dir = base_dir or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    port = _read_server_section(base_dir).get("port")
+    return int(port) if port else 8000
+
+
 def load_config(base_dir: str, env_file: Optional[str] = None,
                 hosts_file: Optional[str] = None) -> AppConfig:
-    """加载完整应用配置。base_dir 为项目根目录。"""
+    """加载完整应用配置。base_dir 为项目根目录。
+
+    配置文件优先 config/config.yaml；不存在时回退旧名 config/hosts.yaml（兼容老部署）。
+    """
     env_file = env_file or os.path.join(base_dir, ".env")
-    hosts_file = hosts_file or os.path.join(base_dir, "config", "hosts.yaml")
+    if hosts_file is None:
+        hosts_file = _config_file_path(base_dir)
     load_dotenv(env_file)
 
-    with open(hosts_file, "r", encoding="utf-8") as f:
-        raw = yaml.safe_load(f) or {}
+    if hosts_file is None:
+        raw = {}  # 无配置文件：全部用默认值
+    else:
+        with open(hosts_file, "r", encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
 
     g_raw = raw.get("global") or {}
     h_raw = g_raw.get("history") or {}
@@ -246,11 +287,11 @@ def load_config(base_dir: str, env_file: Optional[str] = None,
         if h.id in seen:
             raise ValueError("重复的 host id: %s" % h.id)
         seen.add(h.id)
-        if not h.ssh.key_path and not h.ssh.password:
-            raise ValueError("host %s 未配置 SSH 凭证（key_path 或 password）" % h.id)
+        if not (h.ssh.key_path or h.ssh.password or h.ssh.key_data):
+            raise ValueError("host %s 未配置 SSH 凭证（key_path / key_data 或 password）" % h.id)
         if h.ssh.key_path:
             h.ssh.key_path = os.path.expanduser(h.ssh.key_path)
 
-    port = int(os.environ.get("PORT", 8000))
+    port = resolve_port(base_dir)
     return AppConfig(global_cfg=global_cfg, hosts=hosts, port=port)
 

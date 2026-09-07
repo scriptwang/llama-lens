@@ -1,6 +1,8 @@
 """主机/服务指标采集：单次 SSH 执行复合脚本（CPU/内存/GPU/服务进程），另提供 journalctl 日志接口"""
 
-from fastapi import APIRouter, Depends
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Request
 
 from ..errors import ApiError, SSH_CMD_FAILED, ok, validate_unit_name
 from .auth import get_current_user
@@ -13,11 +15,89 @@ MAX_LOG_LINES = 1000
 METRICS_TIMEOUT = 15
 
 
+def _monitor_for(request: Request, row):
+    """该主机对应的 HostMonitor（未启用监控/独立 ctl 模式返回 None）。"""
+    reg = getattr(request.app.state, "registry", None)
+    if reg is None:
+        return None
+    return reg.get(row["mid"])
+
+
+def _parse_etime(etime: str) -> Optional[int]:
+    """ps etime 格式 [[DD-]HH:]MM:SS → 秒。"""
+    if not etime:
+        return None
+    days = 0
+    if "-" in etime:
+        d, etime = etime.split("-", 1)
+        try:
+            days = int(d)
+        except ValueError:
+            return None
+    try:
+        parts = [int(x) for x in etime.split(":")]
+    except ValueError:
+        return None
+    while len(parts) < 3:
+        parts.insert(0, 0)
+    h, m, sec = parts[-3:]
+    return days * 86400 + h * 3600 + m * 60 + sec
+
+
+def _metrics_from_snapshot(hm: dict) -> dict:
+    """监控快照 host_metrics → /api/metrics 响应格式（复用 SshPoller 2s 采集，零额外 SSH）。"""
+    cpu = hm.get("cpu") or {}
+    mem = hm.get("mem") or {}
+    total = mem.get("total_mb")
+    used = mem.get("used_mb")
+    gpus = []
+    for g in hm.get("gpus") or []:
+        gpus.append({
+            "index": g.get("index", 0),
+            "name": g.get("name", ""),
+            "util_percent": g.get("util_pct"),
+            "mem_used_mb": g.get("mem_used_mb"),
+            "mem_total_mb": g.get("mem_total_mb"),
+            "power_w": g.get("power_w"),
+            "power_limit_w": g.get("power_limit_w"),
+            "temp_c": g.get("temp_c"),
+        })
+    services = {}
+    unit = (hm.get("service") or {}).get("unit")
+    proc = hm.get("process") or {}
+    if unit and proc.get("found"):
+        services[unit] = {
+            "pid": proc.get("pid"),
+            "cpu_percent": _r1(proc.get("cpu_pct_realtime")),
+            "mem_mb": proc.get("rss_mb"),
+            "uptime_sec": _parse_etime(proc.get("elapsed", "")),
+        }
+    return {
+        "cpu": {
+            "percent": _r1(cpu.get("usage_pct")),
+            "cores": cpu.get("cores"),
+            "load": cpu.get("load") or [],
+        },
+        "memory": {
+            "total_mb": total,
+            "used_mb": used,
+            "percent": round(used / total * 100.0, 1) if (total and used is not None) else None,
+        },
+        "gpu": {"vendor": "nvidia" if gpus else None, "devices": gpus},
+        "services": services,
+    }
+
+
 def _f(value):
     try:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _r1(value):
+    """百分比保留 1 位小数（None 透传）。"""
+    return round(value, 1) if value is not None else None
 
 
 def _build_script(names) -> str:
@@ -164,8 +244,13 @@ def _parse_output(out: str) -> dict:
 
 
 @router.get("")
-def get_metrics(host_id: int, services: str = "", user: str = Depends(get_current_user)):
-    """主机级 + 运行中服务级指标（单次 SSH 采集）"""
+def get_metrics(request: Request, host_id: int, services: str = "",
+                user: str = Depends(get_current_user)):
+    """主机级 + 运行中服务级指标。
+
+    优先复用监控快照（SshPoller 每 2s 已在采集，零额外 SSH）；
+    无监控/不可达时回退单次 SSH 复合脚本；请求的服务超出监控范围时仅对差额补采。
+    """
     names = []
     for n in services.split(","):
         n = n.strip()
@@ -173,6 +258,24 @@ def get_metrics(host_id: int, services: str = "", user: str = Depends(get_curren
             validate_unit_name(n)
             names.append(n)
     row = get_host_row(host_id)
+
+    mon = _monitor_for(request, row)
+    if mon is not None:
+        hm = mon.snapshot()["host_metrics"]
+        if hm.get("reachable"):
+            result = _metrics_from_snapshot(hm)
+            rest = [n for n in names if n != mon.cfg.systemd_unit]
+            if rest:
+                client = pool.checkout(host_to_conn_dict(row))
+                try:
+                    code, out, err = exec_cmd(client, _build_script(rest), timeout=METRICS_TIMEOUT)
+                    if code != 0:
+                        raise ApiError(SSH_CMD_FAILED, "指标采集失败：%s" % (err or out).strip()[:200])
+                    result["services"].update(_parse_output(out)["services"])
+                finally:
+                    pool.checkin(client)
+            return ok(result)
+
     client = pool.checkout(host_to_conn_dict(row))
     try:
         code, out, err = exec_cmd(client, _build_script(names), timeout=METRICS_TIMEOUT)

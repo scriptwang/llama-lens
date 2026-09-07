@@ -21,7 +21,7 @@
     <div class="svc-cmd" :title="service.execstart">{{ service.execstart || '（未找到 ExecStart）' }}</div>
 
     <div v-if="isActive && svcMetrics" class="svc-metrics">
-      <span class="sm-item" title="进程启动以来 CPU 均值"><el-icon><Cpu /></el-icon>CPU {{ svcMetrics.cpu_percent }}%</span>
+      <span class="sm-item" title="进程启动以来 CPU 均值"><el-icon><Cpu /></el-icon>CPU {{ fmtPct(svcMetrics.cpu_percent) }}</span>
       <span class="sm-item" title="进程内存占用"><el-icon><Odometer /></el-icon>{{ fmtMem(svcMetrics.mem_mb) }}</span>
       <span class="sm-item" title="已运行时长"><el-icon><Timer /></el-icon>{{ fmtUptime(svcMetrics.uptime_sec) }}</span>
     </div>
@@ -68,6 +68,11 @@ defineEmits(['action', 'edit', 'restore', 'logs', 'duplicate'])
 
 const isActive = computed(() => props.service.active_state === 'active')
 const svcMetrics = computed(() => (props.metrics ? props.metrics[props.service.name] : null))
+
+function fmtPct(v) {
+  if (v == null) return '—'
+  return (Math.round(v * 10) / 10).toFixed(1) + '%'
+}
 
 function fmtMem(mb) {
   if (mb == null) return '—'
