@@ -142,6 +142,8 @@ class GlobalConfig:
     history_agg_days: int = 90
     history_events_days: int = 30
     history_flush_interval: float = 5.0
+    # 电价（元/kWh，0 = 不显示费用）
+    electricity_price: float = 0.0
 
 
 @dataclass
@@ -282,6 +284,7 @@ def load_config(base_dir: str, env_file: Optional[str] = None,
         history_agg_days=int(h_raw.get("agg_retention_days", 90)),
         history_events_days=int(h_raw.get("events_retention_days", 30)),
         history_flush_interval=float(h_raw.get("flush_interval", 5.0)),
+        electricity_price=float(g_raw.get("electricity_price", 0.0)),
     )
 
     hosts = [_build_host(h, global_cfg.thresholds) for h in (raw.get("hosts") or [])]

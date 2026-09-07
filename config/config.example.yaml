@@ -25,6 +25,7 @@ global:
     # raw_retention_days: 7   # 原始数据保留天数
     # agg_retention_days: 90  # 1 分钟聚合数据保留天数
     # events_retention_days: 30
+  # electricity_price: 0.0    # 电价（元/kWh，0 = 不显示电费；效率统计用）
   # thresholds:               # 全局阈值覆盖（可选，默认见 backend/config.py）
   #   gpu_util: {warn: 80, danger: 90}
   #   ctx: {warn: 80, danger: 90}

@@ -35,6 +35,7 @@
     <div class="bottom mono">
       <span>CPU <b :class="valClass(host.cpu_pct)">{{ host.cpu_pct === null ? '—' : Math.round(host.cpu_pct) + '%' }}</b></span>
       <span>MEM <b :class="valClass(host.mem_pct)">{{ host.mem_pct === null ? '—' : Math.round(host.mem_pct) + '%' }}</b></span>
+      <span v-if="tokensPerDay !== null" class="eff" title="近 24h Token 产出">⚡ {{ fmtTokens(tokensPerDay) }}/天</span>
       <span v-if="!host.ssh_ok" class="lv-warn">SSH 断开</span>
       <span v-if="!host.online" class="lv-danger">llama 离线</span>
     </div>
@@ -42,11 +43,26 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import { fmtParams, sparkPath, useCountUp, alertLevel } from '../utils'
+import { computed, ref, onMounted } from 'vue'
+import { fmtParams, fmtTokens, sparkPath, useCountUp, alertLevel } from '../utils'
 
 const props = defineProps({
   host: { type: Object, required: true }
+})
+
+// 近 24h Token 产出（P1-2，静默拉取，失败不显示）
+const tokensPerDay = ref(null)
+onMounted(async () => {
+  try {
+    const token = localStorage.getItem('llama_token')
+    const resp = await fetch(`/api/efficiency?host_id=${encodeURIComponent(props.host.id)}&range=24h`, {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+    })
+    if (resp.ok) {
+      const d = await resp.json()
+      if (d.available) tokensPerDay.value = d.tokens_per_day
+    }
+  } catch (e) { /* 忽略 */ }
 })
 
 const speed = useCountUp(computed(() => (props.host.online ? props.host.gen_speed_tps || 0 : 0)))
@@ -128,6 +144,7 @@ function valClass(v) {
 .gpu-row .bar { flex: 1; }
 .gpu-val { width: 38px; text-align: right; font-size: 12px; flex: none; }
 .gpu-mem { width: 64px; text-align: right; font-size: 10px; flex: none; }
-.bottom { display: flex; gap: 16px; font-size: 12px; color: var(--text-dim); }
+.bottom { display: flex; gap: 16px; font-size: 12px; color: var(--text-dim); flex-wrap: wrap; }
 .bottom b { color: var(--text); font-weight: 600; }
+.bottom .eff { color: var(--cyan); }
 </style>

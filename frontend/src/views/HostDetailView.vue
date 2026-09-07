@@ -163,6 +163,12 @@
             <TrendChart title="负载均值" unit="load" :series="chartLoad" :height="170" />
           </div>
         </section>
+
+        <!-- ============ 效率统计区（P1-2：token 产出 + 耗电 + tokens/瓦） ============ -->
+        <section>
+          <div class="section-title">效率统计</div>
+          <EfficiencyCard :host-id="props.id" />
+        </section>
         </template>
       </div>
 
@@ -221,6 +227,7 @@ import EventFeed from '../components/EventFeed.vue'
 import ServiceTab from '../components/ServiceTab.vue'
 import ModelTab from '../components/ModelTab.vue'
 import PlaygroundTab from '../components/PlaygroundTab.vue'
+import EfficiencyCard from '../components/EfficiencyCard.vue'
 
 const props = defineProps({ id: { type: String, required: true } })
 
