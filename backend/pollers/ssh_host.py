@@ -100,37 +100,6 @@ fi
 echo ==END==
 """
 
-# Windows 批量采集命令（PowerShell，适配 bash shell）
-# 注意：使用 bash -c 包裹所有命令，{process_name} {systemd_unit} {df_mounts} 是 Python 占位符
-# PowerShell 的 {0},{1},{2} 需要用 {{0}},{{1}},{{2}} 转义
-BATCH_CMD_WINDOWS = (
-    'bash -c \'echo ==GPU== && '
-    'nvidia-smi --query-gpu=index,name,driver_version,memory.total,memory.used,memory.free,utilization.gpu,utilization.memory,temperature.gpu,power.draw,power.limit,fan.speed,clocks.current.graphics,clocks.current.memory,pcie.link.gen.current,pcie.link.width.current,pstate,temperature.memory,ecc.errors.corrected.volatile.total,ecc.errors.uncorrected.volatile.total,clocks_throttle_reasons.active --format=csv,noheader,nounits 2>/dev/null && '
-    'echo ==SMI== && '
-    "nvidia-smi 2>/dev/null | sed -n 3p && "
-    'echo ==APPS== && '
-    'nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader,nounits 2>/dev/null && '
-    'echo ==CPU== && '
-    'powershell -NoProfile -NonInteractive -Command "Get-CimInstance Win32_Processor | Select-Object -Property Name,NumberOfCores,NumberOfLogicalProcessors,MaxClockSpeed | ConvertTo-Json -Compress" && '
-    'echo ==MEM== && '
-    'powershell -NoProfile -NonInteractive -Command "$os = Get-CimInstance Win32_OperatingSystem; \'{0},{1},{2}\' -f [math]::Round($os.TotalVisibleMemorySize/1MB,2),[math]::Round(($os.TotalVisibleMemorySize-$os.FreePhysicalMemory)/1MB,2),[math]::Round($os.FreePhysicalMemory/1MB,2)" && '
-    'echo ==LOAD== && '
-    'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_Processor | Select-Object -Property LoadPercentage)[0].LoadPercentage" && '
-    "echo ==DISK== && "
-    "powershell -NoProfile -NonInteractive -Command \"Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | Select-Object DeviceID,Size,FreeSpace | ConvertTo-Json -Compress\" && "
-    "echo ==NET== && "
-    "powershell -NoProfile -NonInteractive -Command \"Get-CimInstance Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=True' | Select-Object Caption,BytesReceivedPerSec,BytesSentPerSec | ConvertTo-Json -Compress\" && "
-    'echo ==PROC== && '
-    'powershell -NoProfile -NonInteractive -Command "$proc = Get-Process -Name {process_name} -ErrorAction SilentlyContinue | Sort-Object WorkingSet64 -Descending | Select-Object -First 1; if ($proc) {{ Write-Host (\'P:\' + $proc.Id); Write-Host (\'{0} {1} {2}\' -f $proc.CPU, $proc.WorkingSet64, $proc.TotalProcessorTime.TotalSeconds); Write-Host $proc.TotalProcessorTime.ToString(\'hh\\\\:mm\\\\:ss\') }}" && '
-    'echo ==PS== && '
-    "powershell -NoProfile -NonInteractive -Command \"Get-Process | Where-Object {{ $_.Id -ne $PID }} | Select-Object Id,ProcessName,CPU,WorkingSet64 | Sort-Object CPU -Descending | Select-Object -First 50 | ForEach-Object {{ '{0} {1} {2} {3}' -f $_.Id, $_.ProcessName, [math]::Round($_.CPU,2), [math]::Round($_.WorkingSet64/1MB,2) }}\" && "
-    'echo ==SERVICE== && '
-    'powershell -NoProfile -NonInteractive -Command "Get-Service -Name {systemd_unit} -ErrorAction SilentlyContinue | Select-Object Name,DisplayName,Status,StartTime | ConvertTo-Json -Compress" && '
-    'echo ==MODELS== && '
-    'powershell -NoProfile -NonInteractive -Command "$proc = Get-Process -Name {process_name} -ErrorAction SilentlyContinue | Sort-Object WorkingSet64 -Descending | Select-Object -First 1; if ($proc) {{ Write-Host $proc.GetCommandLine() }}" && '
-    'echo ==END==\''
-)
-
 # 默认使用 Linux 命令
 STATIC_CMD = STATIC_CMD_LINUX
 BATCH_CMD = BATCH_CMD_LINUX
@@ -894,6 +863,42 @@ class SshPoller:
                 df_mounts=" ".join(mounts),
             )
 
+    def _build_win_nvidia_cmd(self) -> str:
+        """合并 3 条 nvidia-smi 命令为 1 条（去掉 cmd /c 包装），用 && 串联。"""
+        return (
+            'echo ==GPU== && '
+            'nvidia-smi --query-gpu=index,name,driver_version,memory.total,memory.used,memory.free,utilization.gpu,utilization.memory,temperature.gpu,power.draw,power.limit,fan.speed,clocks.current.graphics,clocks.current.memory,pcie.link.gen.current,pcie.link.width.current,pstate,temperature.memory,ecc.errors.corrected.volatile.total,ecc.errors.uncorrected.volatile.total,clocks_throttle_reasons.active --format=csv,noheader,nounits && '
+            'echo ==SMI== && '
+            'nvidia-smi && '
+            'echo ==APPS== && '
+            'nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader,nounits'
+        )
+
+    def _build_win_pshell_cmd(self) -> str:
+        """合并 9 条 powershell 命令为 1 条，远端 powershell.exe 子进程从 9 个降为 1 个。
+
+        各段用 Write-Host '==SECTION==' 输出标记，split_sections 按标记分段解析。
+        """
+        pn = self.cfg.process_name
+        su = self.cfg.systemd_unit
+        sections = [
+            ("CPU", r"Get-CimInstance Win32_Processor | Select-Object -Property Name,NumberOfCores,NumberOfLogicalProcessors,MaxClockSpeed | ConvertTo-Json -Compress"),
+            ("MEM", r"$os = Get-CimInstance Win32_OperatingSystem; $t = [math]::Round($os.TotalVisibleMemorySize/1MB,2); $u = [math]::Round(($os.TotalVisibleMemorySize-$os.FreePhysicalMemory)/1MB,2); $f = [math]::Round($os.FreePhysicalMemory/1MB,2); Write-Host ($t.ToString() + ',' + $u.ToString() + ',' + $f.ToString())"),
+            ("LOAD", r"$proc = Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor | Where-Object {$_.Name -eq '_total'}; $proc.PercentProcessorTime"),
+            ("DISK", r"Get-CimInstance Win32_LogicalDisk -Filter DriveType=3 | Select-Object DeviceID,Size,FreeSpace | ConvertTo-Json -Compress"),
+            ("NET", r"Get-CimInstance Win32_PerfFormattedData_Tcpip_NetworkInterface | Select-Object Name,CurrentBandwidth,BytesTotalPerSec | ConvertTo-Json -Compress"),
+            ("PROC", r"$proc = Get-Process -Name " + pn + r" -ErrorAction SilentlyContinue | Sort-Object WorkingSet64 -Descending | Select-Object -First 1; if ($proc) { $cpu = [math]::Round($proc.CPU, 2); $rss = $proc.WorkingSet64; $ticks = [math]::Round($proc.TotalProcessorTime.TotalSeconds, 2); Write-Host ('P:' + $proc.Id); Write-Host ($cpu.ToString() + ' ' + $rss.ToString() + ' ' + $ticks.ToString()); Write-Host $proc.TotalProcessorTime.ToString('hh\\:mm\\:ss') }"),
+            ("PS", r"Get-Process | Where-Object {$_.Id -ne $PID} | Select-Object Id,ProcessName,CPU,WorkingSet64 | Sort-Object CPU -Descending | Select-Object -First 50 | ForEach-Object { [string]$cpu = [math]::Round($_.CPU,2); [string]$rss = [math]::Round($_.WorkingSet64/1MB,2); Write-Host ($_.Id.ToString() + ' ' + $_.ProcessName + ' ' + $cpu + ' ' + $rss) }"),
+            ("SERVICE", r"Get-Service -Name " + su + r" -ErrorAction SilentlyContinue | Select-Object Name,DisplayName,Status,StartTime | ConvertTo-Json -Compress"),
+            ("MODELS", r"$proc = Get-Process -Name " + pn + r" -ErrorAction SilentlyContinue | Sort-Object WorkingSet64 -Descending | Select-Object -First 1; if ($proc) { Write-Host $proc.GetCommandLine() }"),
+        ]
+        parts = []
+        for name, script in sections:
+            parts.append("Write-Host '==" + name + "=='")
+            parts.append(script)
+        parts.append("Write-Host '==END=='")
+        return 'powershell -NoProfile -NonInteractive -Command "' + "; ".join(parts) + '"'
+
     async def _collect_static(self) -> None:
         # 如果已指定 OS 类型，使用对应命令
         if self._os_type == OSType.LINUX:
@@ -1009,39 +1014,26 @@ class SshPoller:
         ts = time.time()
         log.info("[%s] 开始采集周期 (OS: %s)", self.host_id, self._os_type.value)
         
-        # 检查是否是 Windows（需要逐条命令执行）
+        # 检查是否是 Windows（合并命令执行，减少远端子进程）
         batch_cmd = self._build_batch_cmd()
         if batch_cmd == "windows":
-            log.info("[%s] Windows 批量采集：逐条命令执行", self.host_id)
-            # Windows: 逐条命令执行并合并结果
-            out_parts = []
-            section_names = []
+            log.info("[%s] Windows 批量采集：合并命令执行", self.host_id)
+            # Windows: 合并命令执行（nvidia-smi 一组 + PowerShell 一组），
+            # 远端子进程从 13 个降为 4 个，避免 powershell.exe 内存累积
             commands = [
-                ("GPU", "cmd /c nvidia-smi --query-gpu=index,name,driver_version,memory.total,memory.used,memory.free,utilization.gpu,utilization.memory,temperature.gpu,power.draw,power.limit,fan.speed,clocks.current.graphics,clocks.current.memory,pcie.link.gen.current,pcie.link.width.current,pstate,temperature.memory,ecc.errors.corrected.volatile.total,ecc.errors.uncorrected.volatile.total,clocks_throttle_reasons.active --format=csv,noheader,nounits"),
-                ("SMI", "cmd /c nvidia-smi"),
-                ("APPS", "cmd /c nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader,nounits"),
-                ("CPU", 'powershell -NoProfile -NonInteractive -Command "Get-CimInstance Win32_Processor | Select-Object -Property Name,NumberOfCores,NumberOfLogicalProcessors,MaxClockSpeed | ConvertTo-Json -Compress"'),
-                ("MEM", 'powershell -NoProfile -NonInteractive -Command "$os = Get-CimInstance Win32_OperatingSystem; $t = [math]::Round($os.TotalVisibleMemorySize/1MB,2); $u = [math]::Round(($os.TotalVisibleMemorySize-$os.FreePhysicalMemory)/1MB,2); $f = [math]::Round($os.FreePhysicalMemory/1MB,2); Write-Host ($t.ToString() + \',\' + $u.ToString() + \',\' + $f.ToString())"'),
-                ("LOAD", 'powershell -NoProfile -NonInteractive -Command "$proc = Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor | Where-Object {$_.Name -eq \'_total\'}; $proc.PercentProcessorTime"'),
-                ("DISK", 'powershell -NoProfile -NonInteractive -Command "Get-CimInstance Win32_LogicalDisk -Filter DriveType=3 | Select-Object DeviceID,Size,FreeSpace | ConvertTo-Json -Compress"'),
-                ("NET", 'powershell -NoProfile -NonInteractive -Command "Get-CimInstance Win32_PerfFormattedData_Tcpip_NetworkInterface | Select-Object Name,CurrentBandwidth,BytesTotalPerSec | ConvertTo-Json -Compress"'),
-                ("PROC", f'powershell -NoProfile -NonInteractive -Command "$proc = Get-Process -Name {self.cfg.process_name} -ErrorAction SilentlyContinue | Sort-Object WorkingSet64 -Descending | Select-Object -First 1; if ($proc) {{ $cpu = [math]::Round($proc.CPU, 2); $rss = $proc.WorkingSet64; $ticks = [math]::Round($proc.TotalProcessorTime.TotalSeconds, 2); Write-Host (\'P:\' + $proc.Id); Write-Host ($cpu.ToString() + \' \' + $rss.ToString() + \' \' + $ticks.ToString()); Write-Host $proc.TotalProcessorTime.ToString(\'hh\\:mm\\:ss\') }}"'),
-                ("PS", 'powershell -NoProfile -NonInteractive -Command "Get-Process | Where-Object {$_.Id -ne $PID} | Select-Object Id,ProcessName,CPU,WorkingSet64 | Sort-Object CPU -Descending | Select-Object -First 50 | ForEach-Object {[string]$cpu = [math]::Round($_.CPU,2); [string]$rss = [math]::Round($_.WorkingSet64/1MB,2); Write-Host ($_.Id.ToString() + \' \' + $_.ProcessName + \' \' + $cpu + \' \' + $rss)}"'),
-                ("SERVICE", f'powershell -NoProfile -NonInteractive -Command "Get-Service -Name {self.cfg.systemd_unit} -ErrorAction SilentlyContinue | Select-Object Name,DisplayName,Status,StartTime | ConvertTo-Json -Compress"'),
-                ("MODELS", f'powershell -NoProfile -NonInteractive -Command "$proc = Get-Process -Name {self.cfg.process_name} -ErrorAction SilentlyContinue | Sort-Object WorkingSet64 -Descending | Select-Object -First 1; if ($proc) {{ Write-Host $proc.GetCommandLine() }}"'),
+                self._build_win_nvidia_cmd(),
+                self._build_win_pshell_cmd(),
             ]
-            for section_name, c in commands:
+            out_parts = []
+            for c in commands:
                 try:
                     out_text = await self.ssh.exec_command(c)
                     if out_text:
                         out_text = out_text.strip()
                         if out_text:
-                            # 添加段标记
-                            out_parts.append(f"=={section_name}==")
                             out_parts.append(out_text)
-                            section_names.append(section_name)
                 except Exception as e:
-                    log.warning("[%s] [%s] 命令执行失败: %s", self.host_id, section_name, e)
+                    log.warning("[%s] 命令执行失败: %s", self.host_id, e)
             out_str = "\n".join(out_parts)
         else:
             # Linux: 单条命令执行

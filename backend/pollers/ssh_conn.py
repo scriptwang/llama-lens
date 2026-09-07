@@ -125,12 +125,22 @@ class SshConnection:
             stdin, stdout, stderr = self.client.exec_command(cmd, timeout=timeout)
             # exec_command 的 timeout 只约束建通道；再给 channel 设空闲超时，
             # 防止远端命令挂起时 stdout.read() 永久阻塞、线程泄漏
+            chan = stdout.channel
             try:
-                stdout.channel.settimeout(timeout)
-            except Exception:
-                pass
-            out = stdout.read().decode("utf-8", "replace")
-            return out
+                chan.settimeout(timeout)
+                out = stdout.read().decode("utf-8", "replace")
+                return out
+            finally:
+                # 显式关闭通道与各流，避免 paramiko channel 对象堆积导致内存泄漏
+                for s in (stdin, stdout, stderr):
+                    try:
+                        s.close()
+                    except Exception:
+                        pass
+                try:
+                    chan.close()
+                except Exception:
+                    pass
 
         try:
             out = await asyncio.get_running_loop().run_in_executor(None, _run)
