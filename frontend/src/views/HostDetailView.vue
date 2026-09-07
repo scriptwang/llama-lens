@@ -17,7 +17,7 @@
     <div v-if="!llamaOnline && !sshOk" class="banner-danger">主机不可达（llama 离线 + SSH 断开）</div>
 
     <!-- 平级 Tab：监控 / 服务（?tab=service 可深链） -->
-    <nav class="tabs">
+    <nav ref="tabsRef" class="tabs">
       <button :class="{ on: tab === 'monitor' }" @click="switchTab('monitor')">监控</button>
       <button :class="{ on: tab === 'service' }" @click="switchTab('service')">服务</button>
       <button :class="{ on: tab === 'model' }" @click="switchTab('model')">模型</button>
@@ -27,6 +27,7 @@
     <main class="content">
       <!-- ============ 监控 Tab ============ -->
       <div v-show="tab === 'monitor'" class="tab-pane">
+        <AutoBrowseBar :active="tab === 'monitor' && !!snap" :sticky-top="abTop" :chrome="56 + tabsH" />
         <!-- 首次加载骨架 -->
         <template v-if="!snap">
         <div class="skeleton" style="height: 120px; margin-bottom: 16px"></div>
@@ -229,6 +230,7 @@ import ServiceTab from '../components/ServiceTab.vue'
 import ModelTab from '../components/ModelTab.vue'
 import PlaygroundTab from '../components/PlaygroundTab.vue'
 import EfficiencyCard from '../components/EfficiencyCard.vue'
+import AutoBrowseBar from '../components/AutoBrowseBar.vue'
 
 const props = defineProps({ id: { type: String, required: true } })
 
@@ -248,6 +250,13 @@ const tab = computed(() => {
 function switchTab(t) {
   if (t === tab.value) return
   router.replace({ query: t === 'monitor' ? {} : { tab: t } })
+}
+
+// ---------------- 自动浏览条 sticky 定位（顶栏 56px + tabs 实测高度） ----------------
+const tabsRef = ref(null)
+const tabsH = ref(48)
+function measureTabs() {
+  if (tabsRef.value) tabsH.value = tabsRef.value.offsetHeight
 }
 
 // ---------------- 基础字段 ----------------
@@ -577,16 +586,21 @@ const chartMtp = computed(() => {
 const sparkGen = computed(() => mapTail('gen_speed', (v) => v))
 const sparkPrompt = computed(() => mapTail('prompt_speed', (v) => v))
 
+const abTop = computed(() => `calc(var(--chrome-top, 0px) + ${56 + tabsH.value}px)`)
+
 onMounted(() => {
   loadHistory()
   histTimer = setInterval(loadHistory, 5000)
   document.addEventListener('visibilitychange', onVisibilityChange)
+  measureTabs()
+  window.addEventListener('resize', measureTabs)
 })
 
 watch(winS, loadHistory)
 onBeforeUnmount(() => {
   if (histTimer) clearInterval(histTimer)
   document.removeEventListener('visibilitychange', onVisibilityChange)
+  window.removeEventListener('resize', measureTabs)
 })
 </script>
 

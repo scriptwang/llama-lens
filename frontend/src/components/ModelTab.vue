@@ -14,25 +14,37 @@
       </span>
       <span v-else class="mt-mem mt-mem-none">无内存数据（监控未启用且探测失败）</span>
       <span class="toolbar-spacer" />
-      <el-select v-model="minMb" size="small" class="mt-size-filter" @change="loadModels">
-        <el-option label="全部大小" :value="0" />
-        <el-option label="≥ 50 MB" :value="50" />
-        <el-option label="≥ 1 GB" :value="1024" />
-        <el-option label="≥ 5 GB" :value="5120" />
-      </el-select>
       <el-button type="primary" size="small" :loading="loading" @click="loadModels">
         <el-icon style="margin-right:4px"><Refresh /></el-icon>刷新
       </el-button>
     </div>
-    <div class="ctl-toolbar">
-      <el-input v-model="keyword" size="small" class="mt-search" placeholder="搜索模型名称 / 路径" clearable>
+    <div class="ctl-toolbar mt-search-row">
+      <el-input v-model="draft.name" size="small" class="mt-in" placeholder="模型名称" clearable @keyup.enter="applySearch">
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
+      <el-input v-model="draft.path" size="small" class="mt-in" placeholder="路径关键词" clearable @keyup.enter="applySearch" />
+      <div class="mt-size">
+        <el-input-number v-model="draft.minGb" size="small" :min="0" :max="2048" :step="1" :precision="1" :controls="false" placeholder="最小 GB" class="mt-num" />
+        <span class="mt-dash">—</span>
+        <el-input-number v-model="draft.maxGb" size="small" :min="0" :max="4096" :step="1" :precision="1" :controls="false" placeholder="最大 GB" class="mt-num" />
+      </div>
+      <el-select v-model="draft.days" size="small" class="mt-days">
+        <el-option label="全部时间" :value="0" />
+        <el-option label="1 天内修改" :value="1" />
+        <el-option label="7 天内修改" :value="7" />
+        <el-option label="30 天内修改" :value="30" />
+        <el-option label="90 天内修改" :value="90" />
+        <el-option label="1 年内修改" :value="365" />
+      </el-select>
+      <el-button type="primary" size="small" @click="applySearch">
+        <el-icon style="margin-right:4px"><Search /></el-icon>搜索
+      </el-button>
+      <el-button size="small" plain @click="resetFilters">重置</el-button>
     </div>
 
     <el-empty v-if="!loading && !models.length" description="浏览路径下未扫描到 .gguf 模型文件（可在【主机管理】调整浏览路径）" :image-size="60" />
     <el-empty v-else-if="!filteredModels.length" description="没有符合搜索条件的模型" :image-size="60">
-      <el-button type="primary" plain size="small" @click="keyword = ''">清空搜索</el-button>
+      <el-button type="primary" plain size="small" @click="resetFilters">清空搜索</el-button>
     </el-empty>
     <el-table v-else :data="filteredModels" v-loading="loading" size="small" stripe>
       <el-table-column label="模型" min-width="260">
@@ -43,6 +55,9 @@
       </el-table-column>
       <el-table-column label="大小" width="90" align="right">
         <template #default="{ row }">{{ fmtBytes(row.size) }}</template>
+      </el-table-column>
+      <el-table-column label="修改时间" width="100" align="right">
+        <template #default="{ row }">{{ fmtDate(row.mtime) }}</template>
       </el-table-column>
       <el-table-column label="量化" width="110">
         <template #default="{ row }">
@@ -123,14 +138,33 @@ const props = defineProps({
 })
 
 const ctlDbId = ref(0)
-const minMb = ref(50)  // 默认隐藏 vocab 等小文件
-const keyword = ref('')
 const models = ref([])
+// 搜索：draft=输入框草稿，applied=点“搜索”后生效（回车同效）
+const emptyFilter = () => ({ name: '', path: '', minGb: 0, maxGb: 0, days: 0 })
+const draft = ref(emptyFilter())
+const applied = ref(emptyFilter())
+const GB = 1024 * 1024 * 1024
 const filteredModels = computed(() => {
-  const kw = keyword.value.trim().toLowerCase()
-  if (!kw) return models.value
-  return models.value.filter((m) => m.name.toLowerCase().includes(kw) || m.path.toLowerCase().includes(kw))
+  let list = models.value
+  const name = applied.value.name.trim().toLowerCase()
+  const path = applied.value.path.trim().toLowerCase()
+  if (name) list = list.filter((m) => m.name.toLowerCase().includes(name))
+  if (path) list = list.filter((m) => m.path.toLowerCase().includes(path))
+  if (applied.value.minGb > 0) list = list.filter((m) => m.size >= applied.value.minGb * GB)
+  if (applied.value.maxGb > 0) list = list.filter((m) => m.size <= applied.value.maxGb * GB)
+  if (applied.value.days > 0) {
+    const cutoff = Date.now() / 1000 - applied.value.days * 86400
+    list = list.filter((m) => m.mtime && m.mtime >= cutoff)
+  }
+  return list
 })
+function applySearch() {
+  applied.value = { ...draft.value }
+}
+function resetFilters() {
+  draft.value = emptyFilter()
+  applied.value = emptyFilter()
+}
 const services = ref([])
 const memory = ref(null)
 const loading = ref(false)
@@ -146,6 +180,12 @@ function fmtGib(mb) {
 function fmtBytes(bytes) {
   if (bytes == null) return '—'
   return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GiB'
+}
+function fmtDate(ts) {
+  if (!ts) return '—'
+  const d = new Date(ts * 1000)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 function fitType(level) {
   return { ok: 'success', tight: 'warning', no: 'danger' }[level] || 'info'
@@ -170,7 +210,7 @@ async function loadModels() {
   if (!ctlDbId.value) return
   loading.value = true
   try {
-    const data = await http.get(`/hosts/${ctlDbId.value}/models`, { params: { min_mb: minMb.value } })
+    const data = await http.get(`/hosts/${ctlDbId.value}/models`)
     models.value = data.models || []
     services.value = data.services || []
     memory.value = data.memory
@@ -221,8 +261,12 @@ onMounted(async () => {
 
 <style scoped>
 .mt-title { font-weight: 600; }
-.mt-size-filter { width: 110px; }
-.mt-search { width: 320px; }
+.mt-search-row { flex-wrap: wrap; }
+.mt-in { width: 190px; }
+.mt-size { display: inline-flex; align-items: center; gap: 4px; }
+.mt-num { width: 88px; }
+.mt-dash { color: var(--text-dim, #888); }
+.mt-days { width: 130px; }
 .mt-mem { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .mt-mem-tag { font-family: var(--font-mono, monospace); }
 .mt-mem-none { color: var(--text-dim, #888); font-size: 12px; }

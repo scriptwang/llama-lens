@@ -41,17 +41,68 @@
   border-radius: var(--lc-radius);
   box-shadow: var(--lc-shadow);
 }
-.el-button { border-radius: 8px; font-weight: 500; }
+/* 统一按钮风格：纯色填充 + 白字 + 同色细边框（去掉重渐变/重阴影/重边框） */
+.el-button { border-radius: 8px; font-weight: 500; transition: all 0.18s ease; }
 .el-button--primary {
-  --el-button-bg-color: transparent;
-  --el-button-border-color: transparent;
-  background: var(--lc-gradient);
-  --el-button-hover-bg-color: transparent;
-  --el-button-hover-border-color: transparent;
+  --el-button-bg-color: var(--cyan);
+  --el-button-border-color: var(--cyan);
+  --el-button-text-color: #fff;
+  --el-button-hover-bg-color: var(--cyan);
+  --el-button-hover-border-color: var(--cyan);
   --el-button-hover-text-color: #fff;
+  --el-button-active-bg-color: var(--cyan);
+  --el-button-active-border-color: var(--cyan);
 }
-.el-button--primary:hover { filter: brightness(1.1); }
-.el-button { transition: all 0.18s ease; }
+.el-button--success {
+  --el-button-bg-color: var(--green);
+  --el-button-border-color: var(--green);
+  --el-button-text-color: #fff;
+  --el-button-hover-bg-color: var(--green);
+  --el-button-hover-border-color: var(--green);
+  --el-button-hover-text-color: #fff;
+  --el-button-active-bg-color: var(--green);
+  --el-button-active-border-color: var(--green);
+}
+.el-button--danger {
+  --el-button-bg-color: var(--red);
+  --el-button-border-color: var(--red);
+  --el-button-text-color: #fff;
+  --el-button-hover-bg-color: var(--red);
+  --el-button-hover-border-color: var(--red);
+  --el-button-hover-text-color: #fff;
+  --el-button-active-bg-color: var(--red);
+  --el-button-active-border-color: var(--red);
+}
+.el-button--warning {
+  --el-button-bg-color: var(--amber);
+  --el-button-border-color: var(--amber);
+  --el-button-text-color: #fff;
+  --el-button-hover-bg-color: var(--amber);
+  --el-button-hover-border-color: var(--amber);
+  --el-button-hover-text-color: #fff;
+  --el-button-active-bg-color: var(--amber);
+  --el-button-active-border-color: var(--amber);
+}
+.el-button--primary:hover, .el-button--success:hover, .el-button--danger:hover, .el-button--warning:hover {
+  filter: brightness(1.08);
+}
+/* plain 变体：浅底 + 同色字 + 细边框，清爽 */
+.el-button--primary.is-plain {
+  --el-button-bg-color: transparent;
+  --el-button-border-color: color-mix(in srgb, var(--cyan) 45%, transparent);
+  --el-button-text-color: var(--cyan);
+  --el-button-hover-bg-color: color-mix(in srgb, var(--cyan) 12%, transparent);
+  --el-button-hover-border-color: var(--cyan);
+  --el-button-hover-text-color: var(--cyan);
+}
+.el-button.is-plain {
+  --el-button-bg-color: transparent;
+  --el-button-border-color: var(--lc-border);
+  --el-button-text-color: var(--text-dim);
+  --el-button-hover-bg-color: color-mix(in srgb, var(--text) 6%, transparent);
+  --el-button-hover-border-color: var(--lc-border-strong);
+  --el-button-hover-text-color: var(--text);
+}
 .el-dialog {
   --el-dialog-bg-color: var(--lc-surface-solid);
   border-radius: 16px;

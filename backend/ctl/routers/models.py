@@ -62,20 +62,22 @@ def _scan_gguf(client, roots: list) -> list:
     for root in roots:
         cmd = (
             f"find {shlex.quote(root)} -xdev -maxdepth {MAX_DEPTH} -type f -name '*.gguf' "
-            f"-printf '%s\\t%p\\n' 2>/dev/null | head -n {MAX_MODELS}"
+            f"-printf '%s\\t%T@\\t%p\\n' 2>/dev/null | head -n {MAX_MODELS}"
         )
         code, out, _ = exec_cmd(client, cmd, timeout=SCAN_TIMEOUT)
         if code not in (0, 1):  # find 权限错误返回非 0，但已扫到的部分仍可用
             continue
         for line in out.splitlines():
-            if "\t" not in line:
+            parts = line.split("\t", 2)
+            if len(parts) != 3:
                 continue
-            size_s, path = line.split("\t", 1)
+            size_s, mtime_s, path = parts
             path = path.strip()
             if not path or path in found:
                 continue
             try:
                 size = int(size_s.strip())
+                mtime = int(float(mtime_s.strip()))
             except ValueError:
                 continue
             found[path] = {
@@ -83,6 +85,7 @@ def _scan_gguf(client, roots: list) -> list:
                 "name": path.rsplit("/", 1)[-1],
                 "dir": path.rsplit("/", 1)[0] or "/",
                 "size": size,
+                "mtime": mtime,
                 "quant": "",
                 "mmproj": "",
                 "mmproj_name": "",
