@@ -49,19 +49,19 @@
       <el-button type="primary" plain size="small" @click="resetFilters">清空搜索</el-button>
     </el-empty>
     <el-table v-else :data="filteredModels" v-loading="loading" size="small" stripe>
-      <el-table-column label="模型" min-width="260">
+      <el-table-column label="模型" min-width="260" sortable :sort-method="(a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN', { sensitivity: 'base' })">
         <template #default="{ row }">
           <div class="mt-name">{{ row.name }}</div>
           <div class="mt-path">{{ row.path }}</div>
         </template>
       </el-table-column>
-      <el-table-column label="大小" width="90" align="right">
+      <el-table-column label="大小" width="90" align="right" sortable :sort-method="(a, b) => a.size - b.size">
         <template #default="{ row }">{{ fmtBytes(row.size) }}</template>
       </el-table-column>
-      <el-table-column label="修改时间" width="100" align="right">
+      <el-table-column label="修改时间" width="100" align="right" sortable :sort-method="(a, b) => (a.mtime || 0) - (b.mtime || 0)">
         <template #default="{ row }">{{ fmtDate(row.mtime) }}</template>
       </el-table-column>
-      <el-table-column label="量化" width="110">
+      <el-table-column label="量化" width="110" sortable :sort-method="(a, b) => (a.quant || 'zzz').localeCompare(b.quant || 'zzz')">
         <template #default="{ row }">
           <el-tag v-if="row.quant" size="small" effect="plain">{{ row.quant }}</el-tag>
           <span v-else class="mt-muted">—</span>
