@@ -157,7 +157,10 @@ async function onCtlAction(service, action) {
     if (item && data) Object.assign(item, data)
     else ctlScan()
     ctlPollMetrics()
-  } catch (e) { /* client 已提示 */ }
+  } catch (e) {
+    // 动作失败：主机侧状态可能已变化（如启动失败 → failed），重扫同步，卡片显示「失败」
+    ctlScan()
+  }
   finally {
     delete ctlActionLoading.value[service.name]
   }

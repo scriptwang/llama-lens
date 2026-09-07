@@ -3,7 +3,7 @@
     <router-link to="/" class="back">← 门户</router-link>
     <div class="host-info">
       <span class="dot" :class="dotClass"></span>
-      <span class="hostname">{{ hostName }}</span>
+      <span class="hostname" :title="hostName">{{ hostName }}</span>
       <span v-if="modelName" class="model mono dim" :title="modelTitle">· {{ modelName }}</span>
     </div>
 
