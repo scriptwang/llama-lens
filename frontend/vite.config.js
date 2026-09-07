@@ -15,6 +15,8 @@ const EP_COMPONENT_DIR_ALIAS = {
   ElStep: 'steps',
   ElTableColumn: 'table',
   ElTabPane: 'tabs',
+  ElDropdownMenu: 'dropdown',
+  ElDropdownItem: 'dropdown',
 }
 function ElementPlusSubpathResolver() {
   return {

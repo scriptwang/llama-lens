@@ -5,13 +5,13 @@
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
       <el-select v-model="ctlFilterStatus" class="fb-status" size="small">
-        <el-option label="全部状态" value="" />
+        <el-option label="全部状态" value="all" />
         <el-option label="运行中" value="active" />
         <el-option label="已停止" value="inactive" />
         <el-option label="异常" value="failed" />
       </el-select>
       <el-select v-model="ctlFilterEnabled" class="fb-enabled" size="small">
-        <el-option label="全部自启" value="" />
+        <el-option label="全部自启" value="all" />
         <el-option label="开机自启" value="enabled" />
         <el-option label="未自启" value="disabled" />
       </el-select>
@@ -81,25 +81,25 @@ const ctlDbId = ref(0)
 const ctlServices = ref([])
 // 服务筛选（移植自 LlamaCtl-Web Dashboard：关键词 + 状态 + 自启）
 const ctlFilterKeyword = ref('')
-const ctlFilterStatus = ref('')
-const ctlFilterEnabled = ref('')
+const ctlFilterStatus = ref('all')
+const ctlFilterEnabled = ref('all')
 const ctlFilteredServices = computed(() => {
   const kw = ctlFilterKeyword.value.trim().toLowerCase()
   return ctlServices.value.filter((s) => {
     if (kw && !s.name.toLowerCase().includes(kw)) return false
-    if (ctlFilterStatus.value && s.active_state !== ctlFilterStatus.value) return false
+    if (ctlFilterStatus.value !== 'all' && s.active_state !== ctlFilterStatus.value) return false
     if (ctlFilterEnabled.value === 'enabled' && s.unit_file_state !== 'enabled') return false
     if (ctlFilterEnabled.value === 'disabled' && s.unit_file_state === 'enabled') return false
     return true
   })
 })
 const ctlHasFilter = computed(
-  () => !!(ctlFilterKeyword.value.trim() || ctlFilterStatus.value || ctlFilterEnabled.value),
+  () => !!(ctlFilterKeyword.value.trim() || ctlFilterStatus.value !== 'all' || ctlFilterEnabled.value !== 'all'),
 )
 function clearCtlFilters() {
   ctlFilterKeyword.value = ''
-  ctlFilterStatus.value = ''
-  ctlFilterEnabled.value = ''
+  ctlFilterStatus.value = 'all'
+  ctlFilterEnabled.value = 'all'
 }
 const ctlMetrics = ref(null)
 const ctlMetricsError = ref('')

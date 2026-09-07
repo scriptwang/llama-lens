@@ -18,16 +18,13 @@
 
     <!-- 平级 Tab：监控 / 服务（?tab=service 可深链） -->
     <nav ref="tabsRef" class="tabs">
-      <button :class="{ on: tab === 'monitor' }" @click="switchTab('monitor')">监控</button>
-      <button :class="{ on: tab === 'service' }" @click="switchTab('service')">服务</button>
-      <button :class="{ on: tab === 'model' }" @click="switchTab('model')">模型</button>
-      <button :class="{ on: tab === 'playground' }" @click="switchTab('playground')">试玩</button>
+      <button v-for="t in visibleTabs" :key="t.key" :class="{ on: currentTab === t.key }" @click="switchTab(t.key)">{{ t.label }}</button>
     </nav>
 
     <main class="content">
       <!-- ============ 监控 Tab ============ -->
-      <div v-show="tab === 'monitor'" class="tab-pane">
-        <AutoBrowseBar :active="tab === 'monitor' && !!snap" :sticky-top="abTop" :chrome="56 + tabsH" />
+      <div v-show="currentTab === 'monitor'" class="tab-pane">
+        <AutoBrowseBar :active="currentTab === 'monitor' && !!snap" :sticky-top="abTop" :chrome="56 + tabsH" :default-enabled="uiCfg.auto_browse && uiCfg.auto_browse.enabled" />
         <!-- 首次加载骨架 -->
         <template v-if="!snap">
         <div class="skeleton" style="height: 120px; margin-bottom: 16px"></div>
@@ -176,30 +173,30 @@
 
       <!-- ============ 服务 Tab（LlamaCtl 能力，独立组件） ============ -->
       <ServiceTab
-        v-show="tab === 'service'"
+        v-show="currentTab === 'service'"
         :host-id="props.id"
-        :active="tab === 'service'"
+        :active="currentTab === 'service'"
         :host-label="hostName"
       />
 
       <!-- ============ 模型 Tab（P0-2：清单 + 适配预估 + 一键切换） ============ -->
       <ModelTab
-        v-show="tab === 'model'"
+        v-show="currentTab === 'model'"
         :host-id="props.id"
-        :active="tab === 'model'"
+        :active="currentTab === 'model'"
         :host-label="hostName"
       />
 
       <!-- ============ Playground Tab（P1-1：聊天 + 性能指标） ============ -->
       <PlaygroundTab
-        v-show="tab === 'playground'"
+        v-show="currentTab === 'playground'"
         :host-id="props.id"
-        :active="tab === 'playground'"
+        :active="currentTab === 'playground'"
         :host-label="hostName"
       />
     </main>
 
-    <div v-if="mode === 'paused' && tab === 'monitor'" class="paused-watermark"><span>已暂停</span></div>
+    <div v-if="mode === 'paused' && currentTab === 'monitor'" class="paused-watermark"><span>已暂停</span></div>
   </div>
 </template>
 
@@ -240,13 +237,28 @@ const snap = computed(() => snapshot.value)
 // ---------------- 平级 Tab：监控 / 服务 ----------------
 const route = useRoute()
 const router = useRouter()
+const TAB_DEFS = [
+  { key: 'monitor', label: '监控' },
+  { key: 'service', label: '服务' },
+  { key: 'model', label: '模型' },
+  { key: 'playground', label: '试玩' },
+]
+// UI 功能开关（config.yaml ui 段）：TAB 显隐 + 自动浏览默认开关
+const uiCfg = ref({ tabs: { monitor: true, service: true, model: true, playground: true }, auto_browse: { enabled: false } })
+async function loadUiCfg() {
+  try { uiCfg.value = await api.uiConfig() } catch (e) { /* 保持默认全显 */ }
+}
+const visibleTabs = computed(() => TAB_DEFS.filter((t) => uiCfg.value.tabs && uiCfg.value.tabs[t.key] !== false))
 const tab = computed(() => {
   const t = route.query.tab
-  if (t === 'service') return 'service'
-  if (t === 'model') return 'model'
-  if (t === 'playground') return 'playground'
+  if (t === 'service' || t === 'model' || t === 'playground') return t
   return 'monitor'
 })
+// 当前 Tab：路由指定的 Tab 被配置隐藏时，回退到第一个可见 Tab
+const currentTab = computed(() =>
+  visibleTabs.value.some((t) => t.key === tab.value)
+    ? tab.value
+    : (visibleTabs.value[0] ? visibleTabs.value[0].key : 'monitor'))
 function switchTab(t) {
   if (t === tab.value) return
   router.replace({ query: t === 'monitor' ? {} : { tab: t } })
@@ -590,6 +602,7 @@ const abTop = computed(() => `calc(var(--chrome-top, 0px) + ${56 + tabsH.value}p
 
 onMounted(() => {
   loadHistory()
+  loadUiCfg()
   histTimer = setInterval(loadHistory, 5000)
   document.addEventListener('visibilitychange', onVisibilityChange)
   measureTabs()

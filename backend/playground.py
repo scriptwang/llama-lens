@@ -27,6 +27,9 @@ class ChatReq(BaseModel):
     messages: List[dict]
     temperature: float = 0.7
     top_p: float = 1.0
+    top_k: int = 40        # 0 = 不启用
+    min_p: float = 0.0     # 0 = 不启用
+    repeat_penalty: float = 1.1
     max_tokens: int = 0  # 0 = 不限制
 
 
@@ -69,6 +72,9 @@ async def chat(host_id: str, req: ChatReq, request: Request, user: str = Depends
         "stream_options": {"include_usage": True},
         "temperature": req.temperature,
         "top_p": req.top_p,
+        "top_k": req.top_k,
+        "min_p": req.min_p,
+        "repeat_penalty": req.repeat_penalty,
     }
     if req.max_tokens > 0:
         body["max_tokens"] = req.max_tokens

@@ -263,7 +263,7 @@ onMounted(async () => {
 
 <style scoped>
 .mt-title { font-weight: 600; }
-.mt-search-row { flex-wrap: wrap; }
+.mt-search-row { flex-wrap: wrap; margin-top: 10px; }
 .mt-filter-label { font-size: 12px; color: var(--text-dim, #888); white-space: nowrap; }
 .mt-in { width: 190px; }
 .mt-size { display: inline-flex; align-items: center; gap: 4px; }

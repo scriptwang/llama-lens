@@ -16,5 +16,6 @@ export const api = {
   hosts: () => getJson('/api/hosts'),
   overview: (id) => getJson(`/api/hosts/${encodeURIComponent(id)}/overview`),
   history: (id, window) => getJson(`/api/hosts/${encodeURIComponent(id)}/history?window=${window}`),
-  events: (id, limit = 50) => getJson(`/api/hosts/${encodeURIComponent(id)}/events?limit=${limit}`)
+  events: (id, limit = 50) => getJson(`/api/hosts/${encodeURIComponent(id)}/events?limit=${limit}`),
+  uiConfig: () => getJson('/api/ui')
 }

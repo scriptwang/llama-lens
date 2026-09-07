@@ -33,6 +33,7 @@ const props = defineProps({
   active: { type: Boolean, default: false },   // 仅监控 Tab 激活时运行
   stickyTop: { type: String, default: '0px' }, // sticky 定位 top（顶栏+tabs 之下）
   chrome: { type: Number, default: 56 },       // 本条之上的固定区高度（顶栏+tabs），用于计算一屏步长
+  defaultEnabled: { type: Boolean, default: false }, // config.yaml ui.auto_browse.enabled 默认开关
 })
 
 const STORE_KEY = 'llamalens.autobrowse'
@@ -42,7 +43,7 @@ const speed = ref(80)             // 自动滑动速度 px/s
 const interval = ref(8)           // 轮播时长 秒/屏
 const paused = ref(false)
 
-// 恢复上次设置
+// 恢复上次设置（无本地设置时，开关取 config.yaml 默认值）
 try {
   const saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null')
   if (saved) {
@@ -50,6 +51,8 @@ try {
     if (saved.mode === 'scroll' || saved.mode === 'carousel') mode.value = saved.mode
     if (Number.isFinite(saved.speed)) speed.value = Math.min(400, Math.max(20, saved.speed))
     if (Number.isFinite(saved.interval)) interval.value = Math.min(30, Math.max(2, saved.interval))
+  } else {
+    enabled.value = props.defaultEnabled
   }
 } catch { /* 忽略损坏的本地设置 */ }
 

@@ -33,6 +33,30 @@ _server = _yaml.get("server") if isinstance(_yaml.get("server"), dict) else {}
 _scan = _yaml.get("scan") if isinstance(_yaml.get("scan"), dict) else {}
 
 
+def _bool(v, default):
+    if v is None:
+        return default
+    return str(v).strip().lower() not in ("false", "0", "no", "off")
+
+
+def _ui_config() -> dict:
+    """config.yaml ui 段：顶部 TAB 显隐 + 监控页自动浏览默认开关（缺省全开/关）"""
+    ui = _yaml.get("ui") if isinstance(_yaml.get("ui"), dict) else {}
+    tabs = ui.get("tabs") if isinstance(ui.get("tabs"), dict) else {}
+    ab = ui.get("auto_browse") if isinstance(ui.get("auto_browse"), dict) else {}
+    return {
+        "tabs": {
+            "monitor": _bool(tabs.get("monitor"), True),
+            "service": _bool(tabs.get("service"), True),
+            "model": _bool(tabs.get("model"), True),
+            "playground": _bool(tabs.get("playground"), True),
+        },
+        "auto_browse": {
+            "enabled": _bool(ab.get("enabled"), False),
+        },
+    }
+
+
 def _get(env_key: str, yaml_value, default):
     """优先级：环境变量 > config.yaml > 内置默认"""
     env = os.environ.get(env_key)
@@ -112,6 +136,7 @@ class Settings:
     ])
     jwt_secret: str = ""
     fernet_key: str = ""
+    ui: dict = field(default_factory=_ui_config)
 
 
 settings = Settings()
