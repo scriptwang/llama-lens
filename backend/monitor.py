@@ -48,6 +48,7 @@ class HostMonitor:
         self._stopped = False
         self._last_cmdline: Optional[str] = None
         self._flags: Dict[str, Any] = {}
+        self._ws_hub = None  # 主机 WS fanout（ws.py 创建，stop 时关闭）
 
     # ------------------------------------------------------------------
     def _llama_sink(self, name: str, ts: float, value) -> None:
@@ -90,6 +91,9 @@ class HostMonitor:
 
     async def stop(self) -> None:
         self._stopped = True
+        if self._ws_hub is not None:
+            self._ws_hub.close()
+            self._ws_hub = None
         self.llama.stop()
         self.ssh_poller.stop()
         self.log_poller.stop()
@@ -168,7 +172,8 @@ class HostMonitor:
             if mmproj in sizes:
                 model["mmproj_size"] = sizes[mmproj]
 
-        host_metrics = {k: v for k, v in hm.items() if k != "_model_sizes"}
+        # all_services 仅供 /api/services/state 复用（不进快照，避免 WS 每秒多推全量服务状态）
+        host_metrics = {k: v for k, v in hm.items() if k not in ("_model_sizes", "all_services")}
         if isinstance(host_metrics.get("process"), dict):
             host_metrics["process"] = dict(host_metrics["process"])
             host_metrics["process"]["flags"] = flags

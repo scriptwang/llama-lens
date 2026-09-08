@@ -27,7 +27,7 @@
           <span style="display:flex;align-items:center;gap:8px">
             <span
               class="theme-swatch"
-              :style="{ background: t.dark ? '#1e1e1e' : '#ffffff', border: '1px solid #8884' }"
+              :style="{ background: t.base.bg }"
             />
             {{ t.label }}
           </span>
@@ -145,6 +145,9 @@ onBeforeUnmount(() => {
   color: var(--lc-text-muted);
 }
 .theme-swatch {
-  display: inline-block; width: 14px; height: 14px; border-radius: 4px;
+  display: inline-block; width: 16px; height: 16px; border-radius: 4px; flex: none;
+  /* 中灰描边在明/暗下拉背景上都清晰，内圈高光让浅色块在浅背景上也可辨 */
+  border: 1px solid rgba(128, 128, 128, 0.85);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
 }
 </style>

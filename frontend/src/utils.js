@@ -66,6 +66,17 @@ export function fmtTimeShort(ts) {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
 }
 
+// 锚点时间范围起点（毫秒）：today=今日 0 点 / week=本周一 0 点 / month=本月 1 号 0 点
+export function anchorStartMs(a) {
+  const d = new Date()
+  if (a === 'week') {
+    const day = (d.getDay() + 6) % 7  // 周一=0
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate() - day).getTime()
+  }
+  if (a === 'month') return new Date(d.getFullYear(), d.getMonth(), 1).getTime()
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()  // today（缺省）
+}
+
 // ---------------- 阈值级别 ----------------
 // alerts: [{metric, level, ...}]；返回某指标的最高级别
 export function alertLevel(alerts, metricPrefix) {

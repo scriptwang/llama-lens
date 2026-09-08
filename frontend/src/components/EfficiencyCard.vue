@@ -2,12 +2,13 @@
   <div class="eff glass">
     <div class="eff-head">
       <span class="eff-title">效率统计</span>
-      <span class="eff-ranges">
-        <button v-for="r in ranges" :key="r.v" :class="{ on: range === r.v }" @click="load(r.v)">{{ r.label }}</button>
-      </span>
+      <span v-if="rangeLabel" class="eff-range mono" title="统计范围与「历史趋势」共用时间选择">{{ rangeLabel }}</span>
     </div>
 
-    <div v-if="!data" class="eff-empty">
+    <div v-if="tooShort" class="eff-empty">
+      效率统计需选择 ≥1 天的范围（当前 {{ shortLabel }}）——请在上方「历史趋势」选择 24h / 今日 / 本周 / 本月或更长范围
+    </div>
+    <div v-else-if="!data" class="eff-empty">
       <span v-if="loading">加载中…</span>
       <span v-else-if="data === 'none'">历史存储未启用</span>
       <span v-else>暂无数据</span>
@@ -52,73 +53,111 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { fmtNum, fmtTokens } from '../utils'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { fmtNum, fmtTokens, anchorStartMs } from '../utils'
 import TrendChart from './TrendChart.vue'
 
-// 效率统计（P1-2）：token 产出 + GPU 耗电 + tokens/瓦，数据来自历史库。
+// 效率统计（P1-2）：token 产出 + GPU 耗电 + tokens/瓦。
+// 时间范围与「历史趋势」共用（sel 由父组件传入），不再持有独立选择器：
+//   sel = {type:'window',s} | {type:'anchor',a} | {type:'custom',start,end}
+// 实时窗口（window/anchor）每 30s 轮询（效率数据变化慢，不必跟随趋势的 5s）；自定义只加载一次。
 const props = defineProps({
   hostId: { type: String, required: true },
+  sel: { type: Object, required: true },
 })
 
-const ranges = [
-  { v: '24h', label: '24h' },
-  { v: '7d', label: '7 天' },
-  { v: '30d', label: '30 天' },
-]
-const range = ref('7d')
+const DAY = 86400
 const data = ref(null)
 const loading = ref(false)
+const cur = ref(null)  // { s, e, span } 最近一次计算的范围
+let timer = null
+let reqSeq = 0
 
-const bucketUnit = computed(() => (range.value === '24h' ? 'tokens/时' : 'tokens/天'))
+const isLive = computed(() => props.sel.type !== 'custom')
+
+// 调用时计算范围（实时窗口终点=现在，避免缓存过期）
+function computeRange() {
+  const now = Math.floor(Date.now() / 1000)
+  const sel = props.sel
+  if (sel.type === 'custom') return [sel.start, sel.end]
+  if (sel.type === 'anchor') return [Math.floor(anchorStartMs(sel.a) / 1000), now]
+  return [now - sel.s, now]
+}
+
+function refreshCur() {
+  const [s, e] = computeRange()
+  cur.value = { s, e, span: e - s }
+}
+
+const tooShort = computed(() => !cur.value || cur.value.span < DAY)
+const spanSec = computed(() => (cur.value ? cur.value.span : 0))
+const shortLabel = computed(() => {
+  if (!cur.value) return ''
+  const s = cur.value.span
+  if (s < 3600) return `${Math.max(1, Math.round(s / 60))} 分钟`
+  return `${(s / 3600).toFixed(1)} 小时`
+})
+const rangeLabel = computed(() => {
+  if (!cur.value) return ''
+  const f = (t) => {
+    const d = new Date(t * 1000)
+    const p = (n) => String(n).padStart(2, '0')
+    return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+  }
+  const endTxt = isLive.value ? '现在' : f(cur.value.e)
+  return `${f(cur.value.s)} ~ ${endTxt}`
+})
+
+const bucketUnit = computed(() => (spanSec.value <= DAY ? 'tokens/时' : 'tokens/天'))
 
 const tokenSeries = computed(() => data.value
-  ? [{ name: 'tokens', ts: data.value.series.tokens.ts, values: data.value.series.tokens.values, area: true }]
+  ? [{ name: 'tokens', ts: data.value.series.tokens.ts, values: data.value.series.tokens.values, bar: true }]
   : [])
 const powerSeries = computed(() => data.value
-  ? [{ name: 'W', ts: data.value.series.power_w.ts, values: data.value.series.power_w.values }]
+  ? [{ name: 'W', ts: data.value.series.power_w.ts, values: data.value.series.power_w.values, bar: true }]
   : [])
 
-async function load(r) {
-  range.value = r
+async function load() {
+  refreshCur()
+  if (tooShort.value) { data.value = null; return }
+  const [s, e] = computeRange()
+  const seq = ++reqSeq
   loading.value = true
   try {
     const token = localStorage.getItem('llama_token')
-    const resp = await fetch(`/api/efficiency?host_id=${encodeURIComponent(props.hostId)}&range=${r}`, {
+    const resp = await fetch(`/api/efficiency?host_id=${encodeURIComponent(props.hostId)}&start=${s}&end=${e}`, {
       headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
     })
+    if (seq !== reqSeq) return  // 已有更新请求，丢弃过期响应
     if (resp.ok) {
       const d = await resp.json()
       data.value = d.available ? d : 'none'
     } else {
       data.value = null
     }
-  } catch (e) {
-    data.value = null
+  } catch (err) {
+    if (seq === reqSeq) data.value = null
   } finally {
-    loading.value = false
+    if (seq === reqSeq) loading.value = false
   }
 }
 
-onMounted(() => load('7d'))
+// 时间选择变化立即重载
+watch(() => props.sel, load, { deep: true })
+onMounted(() => {
+  refreshCur()
+  load()
+  timer = setInterval(() => { if (isLive.value) load() }, 30000)
+})
+onBeforeUnmount(() => { if (timer) clearInterval(timer) })
 </script>
 
 <style scoped>
 .eff { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
-.eff-head { display: flex; align-items: center; justify-content: space-between; }
+.eff-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .eff-title { font-weight: 600; }
-.eff-ranges { display: inline-flex; gap: 4px; }
-.eff-ranges button {
-  background: none;
-  border: 1px solid var(--card-border);
-  color: var(--text-dim);
-  font-size: 12px;
-  padding: 3px 10px;
-  border-radius: 4px;
-  cursor: pointer;
-}
-.eff-ranges button.on { color: var(--text); border-color: var(--cyan); background: color-mix(in srgb, var(--cyan) 10%, transparent); }
-.eff-empty { color: var(--text-faint); font-size: 13px; padding: 20px 0; text-align: center; }
+.eff-range { font-size: 12px; color: var(--text-dim); }
+.eff-empty { color: var(--text-faint); font-size: 13px; padding: 20px 0; text-align: center; line-height: 1.7; }
 .eff-stats { display: flex; gap: 12px; flex-wrap: wrap; }
 .eff-stat {
   flex: 1;

@@ -55,6 +55,8 @@ export default defineConfig({
           if (!id.includes('node_modules')) return
           if (id.includes('monaco-editor')) return // 保持 Monaco 独立懒加载 chunk
           if (id.includes('element-plus')) return 'ep'
+          // echarts 仅被 TrendChart/GaugeCard 动态 import：独立 chunk，随图表懒加载，不进首屏 vendor
+          if (id.includes('echarts')) return 'echarts'
           return 'vendor'
         },
       },

@@ -7,6 +7,7 @@
 """
 import asyncio
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 import queue
 import sys
@@ -79,7 +80,9 @@ def setup_logging(base_dir: str) -> None:
         sh = _AsyncStreamHandler(sys.stderr)
         sh.setFormatter(fmt)
         root.addHandler(sh)
-        fh = logging.FileHandler(os.path.join(log_dir, "llamalens.log"), encoding="utf-8")
+        # 轮转：单文件 10MB × 4 份（含当前），防止长期运行日志无限增长
+        fh = RotatingFileHandler(os.path.join(log_dir, "llamalens.log"), encoding="utf-8",
+                                 maxBytes=10 * 1024 * 1024, backupCount=3)
         fh.setFormatter(fmt)
         root.addHandler(fh)
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)

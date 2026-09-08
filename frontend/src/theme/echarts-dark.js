@@ -1,5 +1,26 @@
-import * as echarts from 'echarts'
+// 模块化引入：只注册实际用到的 line/gauge 图表与组件（全量包 ~1.2MB → 按需 ~400KB）。
+// 本文件仅被 TrendChart / GaugeCard 动态 import()，故 echarts 整体成为懒加载 chunk，不进首屏 vendor。
+import * as echarts from 'echarts/core'
+import { LineChart, GaugeChart, BarChart } from 'echarts/charts'
+import {
+  GridComponent,
+  TooltipComponent,
+  LegendComponent,
+  MarkLineComponent,
+} from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
 import { chartTheme } from './index'
+
+echarts.use([
+  LineChart,
+  GaugeChart,
+  BarChart,
+  GridComponent,
+  TooltipComponent,
+  LegendComponent,
+  MarkLineComponent,
+  CanvasRenderer,
+])
 
 const MONO = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 
@@ -73,6 +94,22 @@ export function lineSeries(name, data, color, opts = {}) {
   if (opts.yAxisIndex !== undefined) s.yAxisIndex = opts.yAxisIndex
   if (opts.markLine) s.markLine = opts.markLine
   return s
+}
+
+export function barSeries(name, data, color, opts = {}) {
+  const t = chartTheme()
+  return {
+    name,
+    type: 'bar',
+    data,
+    barMaxWidth: opts.barMaxWidth != null ? opts.barMaxWidth : 28,
+    itemStyle: {
+      color,
+      borderRadius: t.glow ? [3, 3, 0, 0] : 0,
+      ...(t.glow ? { shadowBlur: 6, shadowColor: `${color}44` } : {})
+    },
+    emphasis: { focus: 'series' }
+  }
 }
 
 export function initChart(el) {

@@ -7,6 +7,7 @@
       <el-select v-model="ctlFilterStatus" class="fb-status" size="small">
         <el-option label="全部状态" value="all" />
         <el-option label="运行中" value="active" />
+        <el-option label="非已停止" value="not_inactive" />
         <el-option label="已停止" value="inactive" />
         <el-option label="异常" value="failed" />
       </el-select>
@@ -20,6 +21,9 @@
       <span class="toolbar-spacer" />
       <el-button type="primary" size="small" @click="newServiceVisible = true">
         <el-icon style="margin-right:4px"><Plus /></el-icon>新建服务
+      </el-button>
+      <el-button size="small" :loading="ctlScanning" @click="ctlRefresh">
+        <el-icon style="margin-right:4px"><Refresh /></el-icon>刷新
       </el-button>
       <el-button size="small" :loading="ctlScanning" @click="ctlScan">
         <el-icon style="margin-right:4px"><Refresh /></el-icon>扫描服务
@@ -43,6 +47,7 @@
           @restore="onCtlRestore"
           @logs="openCtlLogs"
           @duplicate="openCtlDup"
+          @rename="onCtlRename"
         />
       </el-col>
     </el-row>
@@ -57,6 +62,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import http from '../api/client'
 import { useAuthStore } from '../stores/auth'
@@ -70,7 +76,7 @@ import RuleEditor from './RuleEditor.vue'
 import LogsDrawer from './LogsDrawer.vue'
 
 // 服务 Tab（LlamaCtl 能力）：systemd 服务扫描/管理 + 主机指标面板。
-// 从 HostDetailView 抽出，独立持有管理侧状态与 5s 指标轮询生命周期。
+// 从 HostDetailView 抽出，独立持有管理侧状态与 1s 状态轮询 / 5s 指标轮询生命周期。
 const props = defineProps({
   hostId: { type: String, required: true },   // mid（监控/路由用）
   active: { type: Boolean, default: false },  // 当前是否显示本 Tab（驱动轮询启停）
@@ -88,7 +94,11 @@ const ctlFilteredServices = computed(() => {
   const kw = ctlFilterKeyword.value.trim().toLowerCase()
   const list = ctlServices.value.filter((s) => {
     if (kw && !s.name.toLowerCase().includes(kw)) return false
-    if (ctlFilterStatus.value !== 'all' && s.active_state !== ctlFilterStatus.value) return false
+    if (ctlFilterStatus.value === 'not_inactive') {
+      if (s.active_state === 'inactive') return false
+    } else if (ctlFilterStatus.value !== 'all' && s.active_state !== ctlFilterStatus.value) {
+      return false
+    }
     if (ctlFilterEnabled.value === 'enabled' && s.unit_file_state !== 'enabled') return false
     if (ctlFilterEnabled.value === 'disabled' && s.unit_file_state === 'enabled') return false
     return true
@@ -118,6 +128,7 @@ const ctlActiveService = ref(null)
 const ctlRuleDialog = ref(false)
 const ctlLogsDrawer = ref(false)
 let ctlMetricsTimer = null
+let ctlStateTimer = null
 
 async function ctlScan() {
   if (!ctlDbId.value) return
@@ -129,6 +140,28 @@ async function ctlScan() {
   } finally {
     ctlScanning.value = false
   }
+}
+
+// 强制刷新：重扫服务状态 + 立即拉取指标（服务自行崩溃等状态变化即时同步，无需等 5s 轮询）
+async function ctlRefresh() {
+  await Promise.all([ctlScan(), ctlPollMetrics()])
+}
+
+// 准实时状态轮询：每秒查询一次（后端复用监控快照，零额外 SSH；服务自行崩溃等变化 ~2s 内同步到卡片/统计）
+async function ctlPollState() {
+  if (!ctlDbId.value || !ctlServices.value.length) return
+  try {
+    const names = ctlServices.value.map((s) => s.name).join(',')
+    const data = await http.get('/services/state', { params: { host_id: ctlDbId.value, names }, silent: true })
+    if (!data) return
+    for (const s of ctlServices.value) {
+      const st = data[s.name]
+      if (st && st.active_state) {
+        s.active_state = st.active_state
+        if (st.sub_state != null) s.sub_state = st.sub_state
+      }
+    }
+  } catch (e) { /* SSH 断开等：保留最后已知状态，不打扰用户 */ }
 }
 
 async function ctlPollMetrics() {
@@ -189,6 +222,32 @@ function openCtlDup(service) {
   ctlDupVisible.value = true
 }
 
+// 重命名：单元文件改名（后端运行中会先停后启，失败自动回滚）
+async function onCtlRename(service) {
+  let newName
+  try {
+    const { value } = await ElMessageBox.prompt(`重命名「${service.name}」`, '重命名服务', {
+      confirmButtonText: '重命名',
+      cancelButtonText: '取消',
+      inputValue: service.name.replace(/\.service$/i, ''),
+      inputPlaceholder: '新服务名（可省略 .service 后缀）',
+      inputValidator: (v) => (!v || !v.trim() ? '请输入新服务名' : true),
+    })
+    newName = value.trim()
+  } catch { return } // 取消
+  if (newName === service.name) { ElMessage.warning('新服务名与原服务名相同'); return }
+  ctlActionLoading.value[service.name] = 'rename'
+  try {
+    const data = await http.post(`/services/${encodeURIComponent(service.name)}/rename`, { new_name: newName },
+      { params: { host_id: ctlDbId.value } })
+    ElMessage.success(`已重命名为 ${data.renamed}`)
+    ctlScan()
+  } catch (e) { /* client 已提示 */ }
+  finally {
+    delete ctlActionLoading.value[service.name]
+  }
+}
+
 onMounted(async () => {
   // 解析管理侧 db_id（统一列表 id=mid，db_id=整型主键）
   try {
@@ -201,7 +260,7 @@ onMounted(async () => {
   } catch (e) { /* 无管理数据 */ }
 })
 
-// 首次进入懒加载 + 5s 指标轮询；离开 Tab 停止轮询
+// 首次进入懒加载 + 1s 状态轮询 + 5s 指标轮询；离开 Tab 停止轮询
 let ctlLoaded = false
 watch([() => props.active, ctlDbId], ([a, dbId]) => {
   if (a && dbId) {
@@ -211,13 +270,24 @@ watch([() => props.active, ctlDbId], ([a, dbId]) => {
       ctlPollMetrics()
     }
     if (!ctlMetricsTimer) ctlMetricsTimer = setInterval(ctlPollMetrics, 5000)
-  } else if (!a && ctlMetricsTimer) {
-    clearInterval(ctlMetricsTimer)
-    ctlMetricsTimer = null
+    if (!ctlStateTimer) {
+      ctlPollState()
+      ctlStateTimer = setInterval(ctlPollState, 1000)
+    }
+  } else {
+    if (ctlMetricsTimer) {
+      clearInterval(ctlMetricsTimer)
+      ctlMetricsTimer = null
+    }
+    if (ctlStateTimer) {
+      clearInterval(ctlStateTimer)
+      ctlStateTimer = null
+    }
   }
 })
 onBeforeUnmount(() => {
   if (ctlMetricsTimer) clearInterval(ctlMetricsTimer)
+  if (ctlStateTimer) clearInterval(ctlStateTimer)
 })
 </script>
 

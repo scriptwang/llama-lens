@@ -135,12 +135,16 @@ watch([enabled, () => props.active], ([e, a]) => {
   else stopLoop()
 })
 
-// 手动滚动 → 暂停 5 秒
-function onUserScroll() {
+// 暂停自动浏览（手动滚动 / 导航跳转触发），5 秒后自动恢复
+function pause(ms = 5000) {
   if (!enabled.value || !props.active) return
   paused.value = true
-  resumeAt = performance.now() + 5000
+  resumeAt = performance.now() + ms
 }
+function onUserScroll() {
+  pause()
+}
+defineExpose({ pause })
 
 function setMode(m) {
   mode.value = m

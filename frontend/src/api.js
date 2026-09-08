@@ -15,7 +15,13 @@ async function getJson(url) {
 export const api = {
   hosts: () => getJson('/api/hosts'),
   overview: (id) => getJson(`/api/hosts/${encodeURIComponent(id)}/overview`),
-  history: (id, window) => getJson(`/api/hosts/${encodeURIComponent(id)}/history?window=${window}`),
+  history: (id, window, start, end) => {
+    const q = new URLSearchParams()
+    if (window) q.set('window', window)
+    if (start) q.set('start', start)
+    if (end) q.set('end', end)
+    return getJson(`/api/hosts/${encodeURIComponent(id)}/history?${q}`)
+  },
   events: (id, limit = 50) => getJson(`/api/hosts/${encodeURIComponent(id)}/events?limit=${limit}`),
   // /api/ui 是 ctl 接口（{code,msg,data} 信封），需解包
   uiConfig: async () => {

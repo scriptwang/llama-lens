@@ -53,13 +53,19 @@ class _Fanout:
     def remove(self, ws: WebSocket) -> None:
         self.clients.discard(ws)
 
+    def close(self) -> None:
+        """停止后台广播任务（主机移除时调用，避免任务持有已停监控导致泄漏）。"""
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+        self._task = None
+
     async def _run(self) -> None:
         while True:
             if self.clients:
                 try:
                     payload = json.dumps(self.payload_fn())
                 except Exception:
-                    log.exception("portal payload 生成失败")
+                    log.exception("payload 生成失败")
                     payload = None
                 if payload is not None:
                     dead = []
@@ -73,13 +79,15 @@ class _Fanout:
             await asyncio.sleep(self.interval)
 
 
-async def _push_loop(ws: WebSocket, payload_fn, interval: float) -> None:
-    while True:
-        try:
-            await ws.send_json(payload_fn())
-        except Exception:
-            return
-        await asyncio.sleep(interval)
+def _host_hub(monitor, interval: float) -> _Fanout:
+    """每主机一个 fanout：每 interval 只序列化一次快照，广播给该主机全部客户端
+    （多标签页/多用户看同一主机时避免逐客户端重复序列化）。挂在 monitor 上，
+    主机移除（monitor.stop）时随 close() 一并取消。"""
+    hub = getattr(monitor, "_ws_hub", None)
+    if hub is None:
+        hub = _Fanout(monitor.snapshot, interval)
+        monitor._ws_hub = hub
+    return hub
 
 
 async def _recv_loop(ws: WebSocket) -> None:
@@ -117,13 +125,14 @@ async def ws_host(ws: WebSocket, host_id: str):
         await ws.close(code=4004)
         return
     interval = registry.app_cfg.global_cfg.push_interval
-    sender = asyncio.create_task(_push_loop(ws, monitor.snapshot, interval))
+    hub = _host_hub(monitor, interval)
+    hub.add(ws)
     try:
         await _recv_loop(ws)
     except WebSocketDisconnect:
         pass
     finally:
-        sender.cancel()
+        hub.remove(ws)
         try:
             # 对端已死时 close 握手会一直等（websockets close_timeout 默认 None），限时 5s
             await asyncio.wait_for(ws.close(), timeout=5.0)

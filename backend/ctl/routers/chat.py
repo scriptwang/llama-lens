@@ -1,4 +1,4 @@
-"""试玩聊天记录持久化（业务库 llama_ctl.db 的 chat_sessions 表）。
+"""测试聊天记录持久化（业务库 llama_ctl.db 的 chat_sessions 表）。
 
 按 (host_id=mid, user) 维度存会话；messages 为 JSON 数组（含 content/reasoning/
 images/metrics/error）。前端从 localStorage 迁移到本接口，跨设备 / 清缓存后仍可恢复。

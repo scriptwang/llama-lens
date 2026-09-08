@@ -20,7 +20,6 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { gaugeOption, initChart } from '../theme/echarts-dark'
 import { chartTheme, themeState } from '../theme'
 import { sparkPath, useCountUp } from '../utils'
 
@@ -82,12 +81,16 @@ const footText = computed(() => props.foot || statsText.value)
 
 function render() {
   if (!chart) return
-  chart.setOption(gaugeOption(props.value, color.value, props.zones))
+  chart.setOption(ed.gaugeOption(props.value, color.value, props.zones))
 }
 
+// echarts-dark 懒加载：echarts 不进首屏 vendor，仅在图表真正挂载时下载
+let ed = null
 onMounted(async () => {
   await nextTick()
-  chart = initChart(el.value)
+  ed = await import('../theme/echarts-dark')
+  if (!el.value) return // 加载期间组件已卸载
+  chart = ed.initChart(el.value)
   render()
   ro = new ResizeObserver(() => chart && chart.resize())
   ro.observe(el.value)

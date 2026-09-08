@@ -4,6 +4,9 @@
       <div class="svc-name-wrap">
         <span class="status-dot" :class="dotClass" />
         <span class="svc-name" :title="service.name">{{ service.name }}</span>
+        <el-tooltip content="重命名服务" placement="top">
+          <el-icon class="svc-rename" @click="$emit('rename', service)"><EditPen /></el-icon>
+        </el-tooltip>
       </div>
       <span class="svc-status">{{ statusText }}</span>
     </div>
@@ -30,7 +33,7 @@
       <el-button size="small" type="success" :disabled="isActive" :loading="actionLoading === 'start'" @click="$emit('action', service, 'start')">
         <el-icon style="margin-right:3px"><VideoPlay /></el-icon>启动
       </el-button>
-      <el-button size="small" type="danger" :disabled="!isActive" :loading="actionLoading === 'stop'" @click="$emit('action', service, 'stop')">
+      <el-button size="small" type="danger" :disabled="isInactive" :loading="actionLoading === 'stop'" @click="$emit('action', service, 'stop')">
         <el-icon style="margin-right:3px"><VideoPause /></el-icon>停止
       </el-button>
       <el-button size="small" type="warning" :loading="actionLoading === 'restart'" @click="$emit('action', service, 'restart')">
@@ -65,9 +68,11 @@ const props = defineProps({
   metrics: { type: Object, default: null },
   actionLoading: { type: String, default: '' },  // 当前进行中的动作（start/stop/restart/refresh）
 })
-defineEmits(['action', 'edit', 'restore', 'logs', 'duplicate'])
+defineEmits(['action', 'edit', 'restore', 'logs', 'duplicate', 'rename'])
 
 const isActive = computed(() => props.service.active_state === 'active')
+// 停止仅在「已停止」时禁用：启动中/停止中/失败等非停止态都允许停止（如 auto-restart 循环中服务永远不是 active，仍需可停）
+const isInactive = computed(() => props.service.active_state === 'inactive')
 const svcMetrics = computed(() => (props.metrics ? props.metrics[props.service.name] : null))
 
 function fmtPct(v) {

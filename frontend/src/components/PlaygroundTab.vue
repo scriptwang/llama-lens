@@ -12,11 +12,15 @@
       <span v-if="!info.online" class="pg-offline">llama 离线，聊天不可用</span>
     </div>
 
-    <!-- 聊天区 -->
+    <!-- 聊天区（右侧：会话操作栏） -->
+    <div class="pg-chatwrap">
+    <div class="pg-main">
     <div ref="chatBox" class="pg-chat">
+      <div class="pg-col">
       <div v-if="loadingSessions && !chat.length" class="pg-empty">加载会话中…</div>
       <div v-else-if="!chat.length" class="pg-empty">
-        输入消息开始推理测试——流式回复，自动统计 TTFT / tokens/s / 总耗时；支持图片（需模型带 mmproj）
+        <div class="pg-empty-title">有什么可以帮你？</div>
+        <div class="pg-empty-sub">流式回复，自动统计 TTFT / tokens/s / 总耗时；支持图片（需模型带 mmproj）</div>
       </div>
       <div v-for="(m, i) in chat" :key="i" class="pg-msg" :class="m.role">
         <div class="pg-role">{{ m.role === 'user' ? '你' : modelFileName }}</div>
@@ -49,71 +53,68 @@
           <span>· {{ m.metrics.tokens }} tokens</span>
         </div>
       </div>
+      </div>
     </div>
 
-    <!-- 输入区 -->
+    <!-- 输入区（GPT 风格圆角卡片：图片 chips + 可折叠参数 + 底部操作栏） -->
     <div class="pg-input">
-      <!-- 采样参数 -->
-      <div class="pg-params">
-        <span class="pg-p-label">参数</span>
-        <div class="pg-p-item"><span>温度</span>
-          <el-slider v-model="params.temperature" :min="0" :max="2" :step="0.1" style="width:96px"
-            :format-tooltip="v => String(v)" />
+      <div class="pg-input-card">
+        <!-- 待发送图片 -->
+        <div v-if="pendingImages.length" class="pg-imgs">
+          <div v-for="(src, i) in pendingImages" :key="i" class="pg-img-chip">
+            <img :src="src" />
+            <span class="pg-img-x" title="移除" @click="pendingImages.splice(i, 1)"><el-icon><Close /></el-icon></span>
+          </div>
         </div>
-        <div class="pg-p-item"><span>top_p</span>
-          <el-input-number v-model="params.top_p" :min="0" :max="1" :step="0.05" :precision="2" size="small" controls-position="right" class="pg-p-num" />
+        <!-- 采样参数（可折叠，默认收起） -->
+        <div v-show="paramsOpen" class="pg-params">
+          <span class="pg-p-label">参数</span>
+          <div class="pg-p-item"><span>温度</span>
+            <el-slider v-model="params.temperature" :min="0" :max="2" :step="0.1" style="width:96px"
+              :format-tooltip="v => String(v)" />
+          </div>
+          <div class="pg-p-item"><span>top_p</span>
+            <el-input-number v-model="params.top_p" :min="0" :max="1" :step="0.05" :precision="2" size="small" controls-position="right" class="pg-p-num" />
+          </div>
+          <div class="pg-p-item"><span>top_k</span>
+            <el-input-number v-model="params.top_k" :min="0" :max="400" :step="1" size="small" controls-position="right" class="pg-p-num" />
+          </div>
+          <div class="pg-p-item"><span>min_p</span>
+            <el-input-number v-model="params.min_p" :min="0" :max="1" :step="0.05" :precision="2" size="small" controls-position="right" class="pg-p-num" />
+          </div>
+          <div class="pg-p-item"><span>重复惩罚</span>
+            <el-input-number v-model="params.repeat_penalty" :min="0.5" :max="2" :step="0.05" :precision="2" size="small" controls-position="right" class="pg-p-num" />
+          </div>
+          <div class="pg-p-item"><span>max_tokens</span>
+            <el-input-number v-model="params.max_tokens" :min="0" :max="32768" :step="256" size="small" controls-position="right" class="pg-p-num-lg" />
+          </div>
+          <el-button size="small" text @click="resetParams">重置</el-button>
         </div>
-        <div class="pg-p-item"><span>top_k</span>
-          <el-input-number v-model="params.top_k" :min="0" :max="400" :step="1" size="small" controls-position="right" class="pg-p-num" />
-        </div>
-        <div class="pg-p-item"><span>min_p</span>
-          <el-input-number v-model="params.min_p" :min="0" :max="1" :step="0.05" :precision="2" size="small" controls-position="right" class="pg-p-num" />
-        </div>
-        <div class="pg-p-item"><span>重复惩罚</span>
-          <el-input-number v-model="params.repeat_penalty" :min="0.5" :max="2" :step="0.05" :precision="2" size="small" controls-position="right" class="pg-p-num" />
-        </div>
-        <div class="pg-p-item"><span>max_tokens</span>
-          <el-input-number v-model="params.max_tokens" :min="0" :max="32768" :step="256" size="small" controls-position="right" class="pg-p-num-lg" />
-        </div>
-        <el-button size="small" text @click="resetParams">重置</el-button>
-      </div>
-
-      <!-- 待发送图片 -->
-      <div v-if="pendingImages.length" class="pg-imgs">
-        <div v-for="(src, i) in pendingImages" :key="i" class="pg-img-chip">
-          <img :src="src" />
-          <span class="pg-img-x" title="移除" @click="pendingImages.splice(i, 1)"><el-icon><Close /></el-icon></span>
-        </div>
-      </div>
-
-      <!-- 输入行 -->
-      <div class="pg-row">
-        <el-input ref="taRef" v-model="input" type="textarea" :rows="3" resize="vertical"
-          placeholder="输入消息，Enter 发送，Shift+Enter 换行；可添加/粘贴图片（需模型带 mmproj）"
+        <el-input ref="taRef" v-model="input" type="textarea" :rows="1" resize="vertical"
+          class="pg-ta"
+          placeholder="发送消息（Enter 发送，Shift+Enter 换行；可添加/粘贴图片）"
           @keydown.enter.exact.prevent="send" @paste="onPaste" />
-        <div class="pg-btns">
-          <el-button class="pg-attach" title="添加图片" @click="fileRef && fileRef.click()">
-            <el-icon :size="18"><Picture /></el-icon>
-          </el-button>
-          <el-button v-if="!streaming" type="primary" :disabled="!input.trim() && !pendingImages.length" @click="send">
-            发送
-          </el-button>
-          <el-button v-else type="danger" @click="stop">
-            停止
-          </el-button>
+        <div class="pg-bar">
+          <div class="pg-bar-side">
+            <button class="pg-icobtn" title="添加图片" @click="fileRef && fileRef.click()"><el-icon><Plus /></el-icon></button>
+            <button class="pg-icobtn" :class="{ active: paramsOpen }" title="采样参数" @click="paramsOpen = !paramsOpen"><el-icon><Setting /></el-icon></button>
+          </div>
+          <div class="pg-bar-side">
+            <button v-if="!streaming" class="pg-sendbtn" :disabled="!input.trim() && !pendingImages.length" title="发送" @click="send"><el-icon><ArrowUp /></el-icon></button>
+            <button v-else class="pg-sendbtn stop" title="停止" @click="stop"><el-icon><Close /></el-icon></button>
+          </div>
         </div>
         <input ref="fileRef" type="file" accept="image/*" multiple class="pg-file" @change="onPickImages" />
       </div>
-
-      <!-- 会话行 -->
-      <div class="pg-sessions">
-        <el-button size="small" @click="newSession">
-          <el-icon style="margin-right:4px"><Plus /></el-icon>新会话
-        </el-button>
-        <el-dropdown v-if="sessionList.length > 1" trigger="click" @command="loadSession">
-          <el-button size="small" plain>
-            <el-icon style="margin-right:4px"><Clock /></el-icon>历史会话（{{ sessionList.length }}）
-          </el-button>
+    </div>
+    </div>
+    <div class="pg-rail">
+      <el-tooltip content="新会话" placement="left">
+        <el-button class="pg-rail-btn" @click="newSession"><el-icon><Plus /></el-icon></el-button>
+      </el-tooltip>
+      <el-tooltip v-if="sessionList.length > 1" :content="`历史会话（${sessionList.length}）`" placement="left">
+        <el-dropdown trigger="click" placement="bottom-end" @command="loadSession">
+          <el-button class="pg-rail-btn"><el-icon><Clock /></el-icon></el-button>
           <template #dropdown>
             <el-dropdown-menu class="pg-sess-menu">
               <el-dropdown-item v-for="ss in sessionList" :key="ss.id" :command="ss.id" class="pg-sess-item">
@@ -124,10 +125,75 @@
             </el-dropdown-menu>
           </template>
         </el-dropdown>
-        <span class="toolbar-spacer" />
-        <el-button v-if="chat.length" size="small" text @click="clearCurrent">清空当前</el-button>
-      </div>
+      </el-tooltip>
+      <el-tooltip content="推理压测" placement="left">
+        <el-button class="pg-rail-btn" @click="openStress"><el-icon><Odometer /></el-icon></el-button>
+      </el-tooltip>
+      <el-tooltip v-if="chat.length" content="清空当前" placement="left">
+        <el-button class="pg-rail-btn" @click="clearCurrent"><el-icon><Delete /></el-icon></el-button>
+      </el-tooltip>
     </div>
+    </div>
+
+    <!-- 压测对话框（P1-1 可选项：N 并发短请求 → 聚合吞吐 + TTFT/延迟分位） -->
+    <el-dialog v-model="stressVisible" title="推理压测" width="540px" :close-on-click-modal="false"
+      :show-close="!stressRunning" :before-close="onStressBeforeClose">
+      <!-- 配置（未开始） -->
+      <div v-if="!stressRunning && !stressResult" class="st-config">
+        <div class="st-row"><span class="st-label">并发数</span>
+          <el-input-number v-model="stressCfg.concurrency" :min="1" :max="16" :step="1" size="small" controls-position="right" />
+          <span class="st-hint">同时推理的路数</span>
+        </div>
+        <div class="st-row"><span class="st-label">请求数</span>
+          <el-input-number v-model="stressCfg.count" :min="1" :max="100" :step="1" size="small" controls-position="right" />
+          <span class="st-hint">总请求条数</span>
+        </div>
+        <div class="st-row"><span class="st-label">每请求 tokens</span>
+          <el-input-number v-model="stressCfg.max_tokens" :min="16" :max="512" :step="16" size="small" controls-position="right" />
+          <span class="st-hint">短请求，避免长生成</span>
+        </div>
+        <div class="st-row st-row-col"><span class="st-label">Prompt</span>
+          <el-input v-model="stressCfg.prompt" type="textarea" :rows="2" maxlength="500" show-word-limit
+            placeholder="缺省：用一句话介绍你自己。" />
+        </div>
+        <div class="st-tip">压测会占用推理资源（期间聊天/其他请求会变慢）。聚合吞吐为端到端口径（含 prefill）；解码吞吐与监控页 gen_speed 同口径（剔除 prefill）。另统计 TTFT / 延迟 P50 / P99。</div>
+      </div>
+
+      <!-- 进行中 -->
+      <div v-if="stressRunning" class="st-progress">
+        <el-progress :percentage="stressPct" :stroke-width="10" :status="stressFail ? 'exception' : undefined" />
+        <div class="st-live">
+          <span>完成 {{ stressDone }}/{{ stressTotal }}</span>
+          <span class="st-ok">成功 {{ stressOk }}</span>
+          <span class="st-fail">失败 {{ stressFail }}</span>
+          <span v-if="stressLiveTps != null" class="st-tps">实时吞吐 {{ stressLiveTps }} tok/s</span>
+        </div>
+      </div>
+
+      <!-- 结果 -->
+      <div v-if="stressResult" class="st-result">
+        <div class="st-hero">
+          <span class="st-hero-num">{{ stressResult.throughput_tps }}</span>
+          <span class="st-hero-unit">tokens/s · 聚合吞吐</span>
+        </div>
+        <div class="st-grid">
+          <div class="st-cell"><span>总 tokens</span><b>{{ stressResult.total_tokens }}</b></div>
+          <div class="st-cell"><span>总耗时</span><b>{{ stressResult.wall_s }} s</b></div>
+          <div class="st-cell"><span>解码吞吐</span><b>{{ stressResult.decode_tps != null ? stressResult.decode_tps + ' tok/s' : '—' }}</b></div>
+          <div class="st-cell"><span>成功 / 失败</span><b>{{ stressResult.ok }} / {{ stressResult.fail }}</b></div>
+          <div class="st-cell"><span>TTFT P50</span><b>{{ stressResult.ttft_p50_ms != null ? stressResult.ttft_p50_ms + ' ms' : '—' }}</b></div>
+          <div class="st-cell"><span>TTFT P99</span><b>{{ stressResult.ttft_p99_ms != null ? stressResult.ttft_p99_ms + ' ms' : '—' }}</b></div>
+          <div class="st-cell"><span>延迟 P50</span><b>{{ stressResult.latency_p50_ms != null ? stressResult.latency_p50_ms + ' ms' : '—' }}</b></div>
+          <div class="st-cell"><span>延迟 P99</span><b>{{ stressResult.latency_p99_ms != null ? stressResult.latency_p99_ms + ' ms' : '—' }}</b></div>
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button v-if="stressRunning" type="danger" @click="stopStress">停止</el-button>
+        <el-button v-else @click="stressVisible = false">关闭</el-button>
+        <el-button v-if="!stressRunning" type="primary" @click="runStress">开始压测</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -179,6 +245,8 @@ watch(params, () => {
 function resetParams() {
   Object.assign(params, DEFAULT_PARAMS)
 }
+// 参数面板：默认收起（GPT 风格输入卡片），底部栏齿轮按钮展开
+const paramsOpen = ref(false)
 
 // ---------------- 会话历史（存业务库 llama_ctl.db，按 host+user 维度） ----------------
 const store = reactive({ current: '', sessions: {} })
@@ -370,8 +438,8 @@ function autoGrow() {
   if (userResized) return
   const ta = taRef.value && taRef.value.textarea
   if (!ta) return
-  ta.style.height = 'auto'
-  ta.style.height = Math.min(Math.max(ta.scrollHeight, 84), 240) + 'px'
+    ta.style.height = 'auto'
+    ta.style.height = Math.min(Math.max(ta.scrollHeight, 24), 240) + 'px'
 }
 watch(input, autoGrow)
 function bindTaResize() {
@@ -396,9 +464,33 @@ function scrollBottom() {
   })
 }
 
+// 剪贴板：非 HTTPS 环境（http://IP:port）clipboard API 不可用，回退 execCommand
+function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text)
+  }
+  return new Promise((resolve, reject) => {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.focus()
+    ta.select()
+    try {
+      if (document.execCommand('copy')) resolve()
+      else reject(new Error('copy failed'))
+    } catch (e) {
+      reject(e)
+    } finally {
+      document.body.removeChild(ta)
+    }
+  })
+}
+
 function copyEndpoint() {
   if (!info.value.endpoint) return
-  navigator.clipboard.writeText(info.value.endpoint)
+  copyText(info.value.endpoint)
     .then(() => ElMessage.success('已复制'))
     .catch(() => ElMessage.error('复制失败'))
 }
@@ -524,6 +616,110 @@ async function send() {
   }
 }
 
+// ---------------- 压测（P1-1 可选项：N 并发短请求 → 聚合吞吐 + 分位） ----------------
+const stressVisible = ref(false)
+const stressRunning = ref(false)
+const stressCfg = reactive({ concurrency: 4, count: 8, max_tokens: 64, prompt: '' })
+const stressDone = ref(0)
+const stressTotal = ref(0)
+const stressOk = ref(0)
+const stressFail = ref(0)
+const stressLiveTps = ref(null)
+const stressResult = ref(null)
+let stressAbort = null
+let stTokens = 0
+let stT0 = 0
+
+function openStress() {
+  if (stressRunning.value) return
+  stressResult.value = null
+  stressDone.value = 0
+  stressTotal.value = 0
+  stressOk.value = 0
+  stressFail.value = 0
+  stressLiveTps.value = null
+  stressVisible.value = true
+}
+
+const stressPct = computed(() => (stressTotal.value ? Math.round((stressDone.value / stressTotal.value) * 100) : 0))
+
+async function runStress() {
+  if (stressRunning.value) return
+  stressRunning.value = true
+  stressResult.value = null
+  stressDone.value = 0
+  stressTotal.value = stressCfg.count
+  stressOk.value = 0
+  stressFail.value = 0
+  stressLiveTps.value = null
+  stTokens = 0
+  stT0 = Date.now()
+  stressAbort = new AbortController()
+  try {
+    const resp = await fetch(`/api/hosts/${encodeURIComponent(props.hostId)}/stress`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('llama_token')}` },
+      signal: stressAbort.signal,
+      body: JSON.stringify({ ...stressCfg }),
+    })
+    if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`)
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      let idx
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const frame = buf.slice(0, idx)
+        buf = buf.slice(idx + 2)
+        handleStressFrame(frame)
+      }
+    }
+  } catch (e) {
+    if (e && e.name !== 'AbortError') ElMessage.error('压测失败：' + String((e && e.message) || e))
+  } finally {
+    stressRunning.value = false
+    stressAbort = null
+  }
+}
+
+function handleStressFrame(frame) {
+  let event = ''
+  const dataLines = []
+  for (const line of frame.split('\n')) {
+    if (line.startsWith('event: ')) event = line.slice(7).trim()
+    else if (line.startsWith('data: ')) dataLines.push(line.slice(6))
+  }
+  if (!dataLines.length) return
+  let data
+  try { data = JSON.parse(dataLines.join('\n')) } catch { return }
+  if (event === 'progress') {
+    stressDone.value = data.done
+    stressOk.value = data.ok
+    stressFail.value = data.fail
+    if (data.tokens) stTokens += data.tokens
+    const elapsed = (Date.now() - stT0) / 1000
+    stressLiveTps.value = elapsed > 0 ? Math.round((stTokens / elapsed) * 10) / 10 : null
+  } else if (event === 'summary') {
+    stressResult.value = data
+    stressLiveTps.value = null
+  } else if (event === 'error') {
+    ElMessage.error(data.msg || '压测出错')
+    stressRunning.value = false
+  }
+}
+
+function stopStress() {
+  if (stressAbort) stressAbort.abort()
+}
+
+function onStressBeforeClose(done) {
+  if (stressRunning.value) { ElMessage.warning('压测进行中，请先停止'); return }
+  done()
+}
+
 onMounted(() => {
   loadInfo()
   loadStore()
@@ -557,35 +753,46 @@ onMounted(() => {
 }
 .pg-model { color: var(--text-dim); font-size: 12px; }
 .pg-offline { color: var(--red); font-size: 12px; }
+.pg-chatwrap { display: flex; gap: 12px; align-items: stretch; flex: 1; }
+.pg-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 .pg-chat {
   flex: 1;
+  min-width: 0;
   min-height: 320px;
-  max-height: 52vh;
+  max-height: 56vh;
   overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 14px;
-  background: var(--card-bg);
-  border: 1px solid var(--card-border);
+  padding: 18px 16px;
+}
+/* GPT 风格：居中窄栏 */
+.pg-col { max-width: 768px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+/* 右侧会话操作栏 */
+.pg-rail { display: flex; flex-direction: column; gap: 8px; flex: none; }
+.pg-rail-btn {
+  width: 34px; height: 34px; padding: 0; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
   border-radius: 8px;
 }
-.pg-empty { color: var(--text-faint); font-size: 13px; text-align: center; margin: auto; }
-.pg-msg { display: flex; flex-direction: column; gap: 4px; max-width: 88%; }
-.pg-msg.user { align-self: flex-end; align-items: flex-end; }
-.pg-msg.assistant { align-self: flex-start; }
-.pg-role { font-size: 11px; color: var(--text-faint); }
+.pg-empty { color: var(--text-faint); font-size: 13px; text-align: center; margin: auto; display: flex; flex-direction: column; gap: 8px; }
+.pg-empty-title { font-size: 20px; font-weight: 700; color: var(--text); }
+.pg-msg { display: flex; flex-direction: column; gap: 6px; }
+.pg-msg.user { align-items: flex-end; }
+.pg-msg.assistant { align-items: flex-start; }
+.pg-role { font-size: 12px; font-weight: 600; color: var(--text-dim); }
 .pg-content {
   white-space: pre-wrap;
   word-break: break-word;
-  font-size: 13px;
-  line-height: 1.6;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--text) 5%, transparent);
-  border: 1px solid var(--card-border);
+  font-size: 14px;
+  line-height: 1.7;
 }
 .pg-content.is-md { white-space: normal; }
+/* 用户：右对齐气泡；助手：纯文本（GPT 风格） */
+.pg-msg.user .pg-content {
+  max-width: 85%;
+  padding: 9px 14px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--cyan) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--cyan) 25%, transparent);
+}
 .pg-md :deep(p) { margin: 0 0 8px; }
 .pg-md :deep(p:last-child) { margin-bottom: 0; }
 .pg-md :deep(pre) {
@@ -652,10 +859,6 @@ onMounted(() => {
   word-break: break-word;
   border-top: 1px dashed var(--card-border);
 }
-.pg-msg.user .pg-content {
-  background: color-mix(in srgb, var(--cyan) 12%, transparent);
-  border-color: color-mix(in srgb, var(--cyan) 25%, transparent);
-}
 .pg-img {
   display: block;
   max-width: 240px;
@@ -669,24 +872,32 @@ onMounted(() => {
 .pg-muted { color: var(--text-faint); }
 .pg-stopped { color: var(--amber); font-size: 12px; }
 .pg-metrics { font-size: 11px; color: var(--text-dim); font-family: var(--font-mono, monospace); }
-.pg-input { display: flex; flex-direction: column; gap: 10px; }
-/* 参数行 */
+.pg-input { width: 100%; max-width: 768px; margin: 0 auto; }
+.pg-input-card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 18px;
+  padding: 10px 12px 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  transition: border-color .15s;
+}
+.pg-input-card:focus-within { border-color: var(--card-border-hover); }
+/* 参数行（可折叠） */
 .pg-params {
   display: flex;
   align-items: center;
   gap: 14px;
   flex-wrap: wrap;
-  padding: 8px 12px;
-  background: var(--card-bg);
-  border: 1px solid var(--card-border);
-  border-radius: 8px;
+  padding: 8px 6px 10px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--card-border);
 }
 .pg-p-label { font-size: 12px; color: var(--text-dim); font-weight: 600; }
 .pg-p-item { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
 .pg-p-num { width: 86px; }
 .pg-p-num-lg { width: 100px; }
 /* 待发送图片 */
-.pg-imgs { display: flex; gap: 8px; flex-wrap: wrap; }
+.pg-imgs { display: flex; gap: 8px; flex-wrap: wrap; padding: 2px 6px 8px; }
 .pg-img-chip {
   position: relative;
   width: 64px; height: 64px;
@@ -706,18 +917,68 @@ onMounted(() => {
   font-size: 12px;
   cursor: pointer;
 }
-/* 输入行 */
-.pg-row { display: flex; gap: 10px; align-items: flex-end; }
-.pg-row :deep(.el-textarea__inner) { min-height: 84px; max-height: 320px; }
-.pg-btns { display: flex; flex-direction: row; align-items: center; gap: 8px; flex: none; }
-.pg-btns .el-button { height: 42px; }
-.pg-btns .pg-attach { width: 42px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+/* 输入框（无边框，自适应高度） */
+.pg-ta :deep(.el-textarea__inner) {
+  background: transparent;
+  box-shadow: none;
+  border: none;
+  padding: 4px 6px;
+  min-height: 24px;
+  max-height: 240px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+/* 底部操作栏 */
+.pg-bar { display: flex; align-items: center; justify-content: space-between; padding: 6px 2px 0; }
+.pg-bar-side { display: flex; align-items: center; gap: 4px; }
+.pg-icobtn {
+  width: 32px; height: 32px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: 50%;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.pg-icobtn:hover { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+.pg-icobtn.active { color: var(--cyan); background: color-mix(in srgb, var(--cyan) 10%, transparent); }
+/* 发送/停止：圆形按钮 */
+.pg-sendbtn {
+  width: 36px; height: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: 50%;
+  background: var(--cyan);
+  color: #06131c;
+  cursor: pointer;
+  transition: opacity .15s, transform .1s;
+}
+.pg-sendbtn:hover:not(:disabled) { transform: translateY(-1px); }
+.pg-sendbtn:disabled { opacity: .3; cursor: not-allowed; }
+.pg-sendbtn.stop { background: transparent; border: 1.5px solid var(--red); color: var(--red); }
 .pg-file { display: none; }
-/* 会话行 */
-.pg-sessions { display: flex; align-items: center; gap: 8px; }
 .pg-sess-item { display: flex; align-items: center; gap: 10px; min-width: 260px; }
 .pg-sess-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pg-sess-time { color: var(--text-faint, #888); font-size: 12px; flex: none; }
 .pg-sess-del { color: var(--text-faint, #888); cursor: pointer; flex: none; }
 .pg-sess-del:hover { color: var(--red); }
+/* 压测对话框 */
+.st-config { display: flex; flex-direction: column; gap: 12px; }
+.st-row { display: flex; align-items: center; gap: 10px; }
+.st-row-col { flex-direction: column; align-items: stretch; gap: 6px; }
+.st-label { width: 96px; flex: none; font-size: 13px; color: var(--text-dim); }
+.st-hint { font-size: 12px; color: var(--text-faint); }
+.st-tip { font-size: 12px; color: var(--text-faint); line-height: 1.6; padding: 8px 10px; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 6px; }
+.st-progress { display: flex; flex-direction: column; gap: 14px; }
+.st-live { display: flex; gap: 18px; font-size: 13px; color: var(--text-dim); flex-wrap: wrap; }
+.st-live .st-ok { color: var(--green, #4caf50); }
+.st-live .st-fail { color: var(--red); }
+.st-live .st-tps { color: var(--cyan, #00e5ff); font-weight: 600; }
+.st-result { display: flex; flex-direction: column; gap: 14px; }
+.st-hero { display: flex; align-items: baseline; gap: 10px; padding: 10px 14px; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; }
+.st-hero-num { font-size: 34px; font-weight: 700; color: var(--cyan, #00e5ff); font-family: 'JetBrains Mono', 'Roboto Mono', monospace; }
+.st-hero-unit { font-size: 12px; color: var(--text-faint); }
+.st-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.st-cell { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 6px; }
+.st-cell span { font-size: 11px; color: var(--text-faint); }
+.st-cell b { font-size: 15px; color: var(--text); font-family: 'JetBrains Mono', 'Roboto Mono', monospace; }
 </style>

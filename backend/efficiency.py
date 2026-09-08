@@ -1,14 +1,14 @@
 """P1-2 效率统计：token 产出 + GPU 累计耗电 + tokens/瓦。
 
-- GET /api/efficiency?host_id={mid}&range=24h|7d|30d
-- 24h 用原始表（ts_llama @1s / ts_host @2s），7d/30d 用 1 分钟聚合表（更轻）。
+- GET /api/efficiency?host_id={mid}&range=24h|7d|30d  或  ?start={unix}&end={unix}（自定义，与历史趋势共用时间选择）
+- 范围 ≤1 天用原始表（ts_llama @1s / ts_host @2s），>1 天用 1 分钟聚合表（更轻）。
 - token 产出 = Σ gen_speed × Δt；耗电 = Σ power × Δt（各卡分别累计）。
 """
 import json
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from .api import _monitor
 from .ctl.routers.auth import get_current_user
@@ -33,24 +33,41 @@ def _bucket_series(points: Dict[int, float], bucket: int, t0: int, t1: int) -> D
 
 @router.get("/efficiency")
 def efficiency(host_id: str, request: Request, range: str = Query(default="7d"),
+               start: Optional[int] = None, end: Optional[int] = None,
                user: str = Depends(get_current_user)):
-    if range not in RANGES:
-        range = "7d"
+    # 时间范围：start/end（自定义，与历史趋势共用）优先；否则固定档位
+    now = int(time.time())
+    if start is not None and end is not None:
+        t0 = int(start)
+        t1 = min(int(end), now)
+        if t1 - t0 < 60:
+            raise HTTPException(status_code=400, detail="时间范围太短（至少 1 分钟）")
+        if t1 - t0 > 90 * DAY:
+            raise HTTPException(status_code=400, detail="时间范围太长（最多 90 天，受历史保留期限制）")
+        if t0 < now - 90 * DAY:
+            t0 = now - 90 * DAY
+        range_name = "custom"
+    else:
+        if range not in RANGES:
+            range = "7d"
+        t0 = now - RANGES[range]
+        t1 = now
+        range_name = range
+    span = t1 - t0
+
     mon = _monitor(request, host_id)
     store = request.app.state.history
     if store is None:
-        return {"range": range, "available": False, "reason": "历史存储未启用"}
+        return {"range": range_name, "start": t0, "end": t1, "available": False, "reason": "历史存储未启用"}
 
-    now = int(time.time())
-    t0 = now - RANGES[range]
-    use_1m = range != "24h"
+    use_1m = span > DAY
     dt = 60 if use_1m else 1          # llama 采样间隔（1m 表为 60s，原始表 1s）
     dt_host = 60 if use_1m else 2     # host 采样间隔（1m 表为 60s，原始表 2s）
 
-    ll = (store.query_llama_1m(host_id, t0, now) if use_1m
-          else store.query_llama(host_id, t0, now))
-    hh = (store.query_host_1m(host_id, t0, now) if use_1m
-          else store.query_host(host_id, t0, now))
+    ll = (store.query_llama_1m(host_id, t0, t1) if use_1m
+          else store.query_llama(host_id, t0, t1))
+    hh = (store.query_host_1m(host_id, t0, t1) if use_1m
+          else store.query_host(host_id, t0, t1))
 
     # ---- token 产出：gen_speed (tok/s) × Δt，按天/按桶累计 ----
     tokens_total = 0.0
@@ -116,9 +133,11 @@ def efficiency(host_id: str, request: Request, range: str = Query(default="7d"),
         price = float(request.app.state.registry.app_cfg.global_cfg.electricity_price or 0.0)
     except Exception:
         pass
-    days = max(1, (now - t0) // DAY)
+    days = max(1, span // DAY)
     out: Dict[str, Any] = {
-        "range": range,
+        "range": range_name,
+        "start": t0,
+        "end": t1,
         "available": True,
         "tokens_total": int(tokens_total),
         "tokens_per_day": int(tokens_total / days),
@@ -129,8 +148,8 @@ def efficiency(host_id: str, request: Request, range: str = Query(default="7d"),
         "cost": round(energy_kwh * price, 2) if price > 0 else None,
         "series": {
             "bucket": bucket,
-            "tokens": _bucket_series(bucket_tokens, bucket, t0, now),
-            "power_w": _bucket_series(bucket_power, bucket, t0, now),
+            "tokens": _bucket_series(bucket_tokens, bucket, t0, t1),
+            "power_w": _bucket_series(bucket_power, bucket, t0, t1),
         },
     }
     return out

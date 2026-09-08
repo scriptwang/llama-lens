@@ -84,3 +84,38 @@ def test_bucket_series_fills_gaps():
     out = _bucket_series({0: 10.0, 3600: 20.0}, 3600, 0, 7201)
     assert out["ts"] == [0, 3600, 7200]
     assert out["values"] == [10.0, 20.0, 0.0]
+
+
+def test_efficiency_custom_range(monkeypatch):
+    """start/end 自定义范围（与历史趋势共用时间选择）：按给定范围统计。"""
+    store = FakeStore()
+    app, _ = _app(monkeypatch, store)
+    now = store.now
+    with TestClient(app) as client:
+        client.app.state.history = store
+        # 最近 2 小时（≤1 天 → 原始表、按小时分桶）
+        r = client.get("/api/efficiency", params={"host_id": "ai", "start": now - 7200, "end": now})
+        assert r.status_code == 200
+        d = r.json()
+        assert d["available"] is True
+        assert d["range"] == "custom"
+        assert d["start"] == now - 7200
+        assert d["end"] == now
+        # 10 tok/s × 7200s ≈ 72000 tokens
+        assert abs(d["tokens_total"] - 72000) < 200
+        # 2 小时按小时分桶：2~3 个点
+        assert 2 <= len(d["series"]["tokens"]["ts"]) <= 3
+
+
+def test_efficiency_custom_range_validation(monkeypatch):
+    store = FakeStore()
+    app, _ = _app(monkeypatch, store)
+    now = store.now
+    with TestClient(app) as client:
+        client.app.state.history = store
+        # 太短（<1 分钟）→ 400
+        r = client.get("/api/efficiency", params={"host_id": "ai", "start": now - 30, "end": now})
+        assert r.status_code == 400
+        # 太长（>90 天）→ 400
+        r = client.get("/api/efficiency", params={"host_id": "ai", "start": now - 91 * 86400, "end": now})
+        assert r.status_code == 400

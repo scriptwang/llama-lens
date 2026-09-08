@@ -169,7 +169,8 @@ async function loadConfig(resetTab = true) {
     parsed.value = data.parsed
     parseError.value = data.parse_error || ''
     inEtc.value = data.in_etc
-    if (resetTab) tab.value = data.parsed ? 'visual' : 'source'
+    // 默认源码模式（用户偏好）；可视化参数 Tab 仍可手动切换（解析失败时自动禁用）
+    if (resetTab) tab.value = 'source'
     if (!Object.keys(dict.value).length) dict.value = await loadDict()
     if (data.parsed) loadHelp(false)
   } finally {

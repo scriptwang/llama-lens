@@ -23,8 +23,19 @@
 
     <main class="content">
       <!-- ============ 监控 Tab ============ -->
-      <div v-show="currentTab === 'monitor'" class="tab-pane">
-        <AutoBrowseBar :active="currentTab === 'monitor' && !!snap" :chrome="56 + tabsH" :default-enabled="uiCfg.auto_browse && uiCfg.auto_browse.enabled" />
+      <div v-show="currentTab === 'monitor'" class="tab-pane monitor-pane">
+        <AutoBrowseBar ref="browseBarRef" :active="currentTab === 'monitor' && !!snap" :chrome="56 + tabsH" :default-enabled="uiCfg.auto_browse && uiCfg.auto_browse.enabled" />
+        <!-- 左侧滚轮导航（iOS wheel picker）：极小、透明、贴屏幕最左侧；分区名排成 3D 圆柱，中间行选中高亮，上下弯向圆柱背面渐隐 -->
+        <nav v-if="snap" class="wheel" aria-label="监控分区导航">
+          <div class="wheel-mask">
+            <div class="wheel-inner" :style="{ transform: 'rotateX(' + wheelAngle + 'deg)' }">
+              <button v-for="(s, i) in secDefs" :key="s.id"
+                      :class="['wheel-item', { on: secActive === s.id }]"
+                      :style="{ transform: 'rotateX(' + (-(i * WHEEL_STEP)) + 'deg) translateZ(' + WHEEL_R + 'px)' }"
+                      @click="scrollToSec(s.id)">{{ s.short }}</button>
+            </div>
+          </div>
+        </nav>
         <!-- 首次加载骨架 -->
         <template v-if="!snap">
         <div class="skeleton" style="height: 120px; margin-bottom: 16px"></div>
@@ -34,7 +45,7 @@
 
         <template v-else>
         <!-- ============ 实时总览区 ============ -->
-        <section>
+        <section id="sec-overview">
           <div class="section-title">实时总览</div>
           <div class="gauge-row">
             <BarCard
@@ -79,7 +90,7 @@
         </section>
 
         <!-- ============ GPU 区 ============ -->
-        <section>
+        <section id="sec-gpu">
           <div class="section-title">GPU（按卡聚合）</div>
           <div v-if="sshOk" class="gpu-grid" :class="{ single: gpus.length <= 1 }">
             <GpuPanel v-for="g in gpus" :key="g.index" :gpu="g" :alerts="alerts" />
@@ -88,7 +99,7 @@
         </section>
 
         <!-- ============ 实时生成任务区 ============ -->
-        <section>
+        <section id="sec-task">
           <div class="section-title">实时生成任务</div>
           <div class="task-row">
             <LlamaStateCard :log="snap.llama.log" :online="llamaOnline" :slots="slots" :flags="flags" :now="snap.ts" />
@@ -97,7 +108,7 @@
         </section>
 
         <!-- ============ 系统区 ============ -->
-        <section>
+        <section id="sec-sys">
           <div class="section-title">系统资源</div>
           <template v-if="sshOk">
             <div class="sys-grid">
@@ -113,7 +124,7 @@
         </section>
 
         <!-- ============ 模型与 Slot 区 ============ -->
-        <section>
+        <section id="sec-model">
           <div class="section-title">模型与 Slot</div>
           <div class="model-grid">
             <ModelInfoCard :model="model" />
@@ -122,7 +133,7 @@
         </section>
 
         <!-- ============ 进程区 ============ -->
-        <section>
+        <section id="sec-proc">
           <div class="section-title">进程</div>
           <template v-if="sshOk">
             <div class="proc-grid">
@@ -137,36 +148,52 @@
         </section>
 
         <!-- ============ 趋势区 ============ -->
-        <section>
+        <section id="sec-trend">
           <div class="section-title trend-title-row">
             历史趋势
             <span class="win-switch mono">
-              <button v-for="w in windows" :key="w.s" :class="{ on: winS === w.s }" @click="winS = w.s">{{ w.label }}</button>
+              <button v-for="w in windows" :key="w.s" :class="{ on: winS === w.s && !anchor && !isCustom }" @click="pickWindow(w.s)">{{ w.label }}</button>
+              <button :class="{ on: anchor === 'today' }" @click="pickAnchor('today')">今日</button>
+              <button :class="{ on: anchor === 'week' }" @click="pickAnchor('week')">本周</button>
+              <button :class="{ on: anchor === 'month' }" @click="pickAnchor('month')">本月</button>
+              <button :class="{ on: isCustom }" @click="toggleCustom">自定义</button>
             </span>
+            <el-date-picker
+              v-if="isCustom"
+              v-model="customRange"
+              type="datetimerange"
+              size="small"
+              class="trend-range"
+              range-separator="~"
+              start-placeholder="开始时间"
+              end-placeholder="结束时间"
+              value-format="x"
+              :disabled-date="disabledDate"
+            />
           </div>
           <div class="trend-grid">
             <div class="trend-group">llama</div>
-            <TrendChart title="Token 生成速度" unit="tok/s" :series="chartGen" :span="winS" :height="170" />
-            <TrendChart title="预填充速度" unit="tok/s" :series="chartPrompt" :span="winS" :height="170" />
-            <TrendChart title="上下文占用" unit="tokens" :series="chartCtx" :span="winS" :height="170" />
-            <TrendChart title="MTP 接受率" unit="%" :series="chartMtp" :span="winS" :height="170" :y-max="100" :y-min="0" />
+            <TrendChart title="Token 生成速度" unit="tok/s" :series="chartGen" :span="isCustom ? customSpan : liveSpan" :x-min="xMin" :x-max="xMax" :height="170" />
+            <TrendChart title="预填充速度" unit="tok/s" :series="chartPrompt" :span="isCustom ? customSpan : liveSpan" :x-min="xMin" :x-max="xMax" :height="170" />
+            <TrendChart title="上下文占用" unit="tokens" :series="chartCtx" :span="isCustom ? customSpan : liveSpan" :x-min="xMin" :x-max="xMax" :height="170" />
+            <TrendChart title="MTP 接受率" unit="%" :series="chartMtp" :span="isCustom ? customSpan : liveSpan" :x-min="xMin" :x-max="xMax" :height="170" :y-max="100" :y-min="0" />
             <div class="trend-group">GPU</div>
-            <TrendChart title="GPU 利用率" unit="%" :series="chartGpuUtil" :span="winS" :height="170" :y-max="100" />
-            <TrendChart title="GPU 显存" unit="MB" :series="chartGpuMem" :span="winS" :height="170" />
-            <TrendChart title="GPU 温度" unit="°C" :series="chartGpuTemp" :span="winS" :height="170" />
-            <TrendChart title="GPU 功耗" unit="W" :series="chartGpuPower" :span="winS" :height="170" />
+            <TrendChart title="GPU 利用率" unit="%" :series="chartGpuUtil" :span="isCustom ? customSpan : liveSpan" :x-min="xMin" :x-max="xMax" :height="170" :y-max="100" />
+            <TrendChart title="GPU 显存" unit="MB" :series="chartGpuMem" :span="isCustom ? customSpan : liveSpan" :x-min="xMin" :x-max="xMax" :height="170" />
+            <TrendChart title="GPU 温度" unit="°C" :series="chartGpuTemp" :span="isCustom ? customSpan : liveSpan" :x-min="xMin" :x-max="xMax" :height="170" />
+            <TrendChart title="GPU 功耗" unit="W" :series="chartGpuPower" :span="isCustom ? customSpan : liveSpan" :x-min="xMin" :x-max="xMax" :height="170" />
             <div class="trend-group">系统</div>
-            <TrendChart title="CPU" unit="%" :series="chartCpu" :span="winS" :height="170" :y-max="100" />
-            <TrendChart title="内存" unit="MB" :series="chartMem" :span="winS" :height="170" />
-            <TrendChart title="网络" unit="MB/s" :series="chartNet" :span="winS" :height="170" />
-            <TrendChart title="负载均值" unit="load" :series="chartLoad" :span="winS" :height="170" />
+            <TrendChart title="CPU" unit="%" :series="chartCpu" :span="isCustom ? customSpan : liveSpan" :x-min="xMin" :x-max="xMax" :height="170" :y-max="100" />
+            <TrendChart title="内存" unit="MB" :series="chartMem" :span="isCustom ? customSpan : liveSpan" :x-min="xMin" :x-max="xMax" :height="170" />
+            <TrendChart title="网络" unit="MB/s" :series="chartNet" :span="isCustom ? customSpan : liveSpan" :x-min="xMin" :x-max="xMax" :height="170" />
+            <TrendChart title="负载均值" unit="load" :series="chartLoad" :span="isCustom ? customSpan : liveSpan" :x-min="xMin" :x-max="xMax" :height="170" />
           </div>
         </section>
 
-        <!-- ============ 效率统计区（P1-2：token 产出 + 耗电 + tokens/瓦） ============ -->
-        <section>
+        <!-- ============ 效率统计区（P1-2：token 产出 + 耗电 + tokens/瓦；时间范围与历史趋势共用） ============ -->
+        <section id="sec-eff">
           <div class="section-title">效率统计</div>
-          <EfficiencyCard :host-id="props.id" />
+          <EfficiencyCard :host-id="props.id" :sel="timeSel" />
         </section>
         </template>
       </div>
@@ -241,7 +268,7 @@ const TAB_DEFS = [
   { key: 'monitor', label: '监控' },
   { key: 'service', label: '服务' },
   { key: 'model', label: '模型' },
-  { key: 'playground', label: '试玩' },
+  { key: 'playground', label: '测试' },
 ]
 // UI 功能开关（config.yaml ui 段）：TAB 显隐 + 自动浏览默认开关
 const uiCfg = ref({ tabs: { monitor: true, service: true, model: true, playground: true }, auto_browse: { enabled: false } })
@@ -269,6 +296,52 @@ const tabsRef = ref(null)
 const tabsH = ref(48)
 function measureTabs() {
   if (tabsRef.value) tabsH.value = tabsRef.value.offsetHeight
+}
+
+// ---------------- 监控左侧分区导航（滚动定位，若隐若现） ----------------
+const browseBarRef = ref(null)
+const secDefs = [
+  { id: 'sec-overview', label: '实时总览', short: '总览' },
+  { id: 'sec-gpu', label: 'GPU（按卡聚合）', short: 'GPU' },
+  { id: 'sec-task', label: '实时生成任务', short: '任务' },
+  { id: 'sec-sys', label: '系统资源', short: '系统' },
+  { id: 'sec-model', label: '模型与 Slot', short: '模型' },
+  { id: 'sec-proc', label: '进程', short: '进程' },
+  { id: 'sec-trend', label: '历史趋势', short: '趋势' },
+  { id: 'sec-eff', label: '效率统计', short: '效率' },
+]
+const secActive = ref('sec-overview')
+const activeIndex = computed(() => secDefs.findIndex((s) => s.id === secActive.value))
+// 滚轮（iOS wheel picker）：每分区 30°，圆柱半径 40px；当前分区转到正面中心
+const WHEEL_STEP = 30
+const WHEEL_R = 34
+const wheelAngle = computed(() => activeIndex.value * WHEEL_STEP)
+let secRaf = 0
+// 顶部固定区高度：终端主题有 38px 窗口标题栏（--chrome-top），其余主题 0
+function chromeTop() {
+  return parseInt(getComputedStyle(document.documentElement).getPropertyValue('--chrome-top'), 10) || 0
+}
+function updateSecActive() {
+  secRaf = 0
+  if (currentTab.value !== 'monitor') return
+  const threshold = chromeTop() + 56 + tabsH.value + 40
+  let current = secDefs[0].id
+  for (const s of secDefs) {
+    const el = document.getElementById(s.id)
+    if (el && el.getBoundingClientRect().top <= threshold) current = s.id
+  }
+  if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = secDefs[secDefs.length - 1].id
+  secActive.value = current
+}
+function onSecScroll() {
+  if (!secRaf) secRaf = requestAnimationFrame(updateSecActive)
+}
+function scrollToSec(id) {
+  const el = document.getElementById(id)
+  if (!el) return
+  browseBarRef.value?.pause() // 导航跳转视为用户操作：暂停自动浏览 5 秒，避免平滑滚动被自动滚动顶掉
+  const top = el.getBoundingClientRect().top + window.scrollY - (chromeTop() + 56 + tabsH.value + 14)
+  window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
 }
 
 // ---------------- 基础字段 ----------------
@@ -477,15 +550,71 @@ const windows = [
   { s: 7776000, label: '90d' }
 ]
 const winS = ref(300)
+const anchor = ref(null)      // 'today' | 'week' | 'month'（锚点实时窗口：起点固定、终点=现在）
+const customRange = ref(null) // [startMs, endMs]（静态自定义范围）
 const history = ref(null)
 let histTimer = null
+
+const isCustom = computed(() => customRange.value != null)
+// 时间选择描述符（趋势 + 效率统计共用）：window / anchor / custom
+const timeSel = computed(() => {
+  if (isCustom.value) {
+    return { type: 'custom', start: Math.floor(customRange.value[0] / 1000), end: Math.floor(customRange.value[1] / 1000) }
+  }
+  if (anchor.value) return { type: 'anchor', a: anchor.value }
+  return { type: 'window', s: winS.value }
+})
+// 实时窗口长度（秒），每次轮询更新；供 x 轴范围与刻度格式使用
+const liveSpan = ref(300)
+const xMin = computed(() => (isCustom.value ? customRange.value[0] : null))
+const xMax = computed(() => (isCustom.value ? customRange.value[1] : null))
+const customSpan = computed(() => (isCustom.value ? (customRange.value[1] - customRange.value[0]) / 1000 : null))
+
+function pickWindow(s) {
+  anchor.value = null
+  customRange.value = null
+  winS.value = s
+}
+
+function pickAnchor(a) {
+  customRange.value = null
+  anchor.value = (anchor.value === a) ? null : a  // 再点同一锚点退回窗口模式
+}
+
+function toggleCustom() {
+  if (isCustom.value) {
+    customRange.value = null  // 退回之前的选择（窗口/锚点）
+    return
+  }
+  anchor.value = null
+  customRange.value = [Date.now() - 3600 * 1000, Date.now()]  // 默认最近 1 小时
+}
+
+// 当前时间范围 [startSec, endSec]（实时窗口终点=现在，调用时计算，避免 computed 缓存导致 end 过期）
+function currentRangeSec() {
+  const nowS = Math.floor(Date.now() / 1000)
+  if (isCustom.value) return [Math.floor(customRange.value[0] / 1000), Math.floor(customRange.value[1] / 1000)]
+  if (anchor.value) return [Math.floor(anchorStartMs(anchor.value) / 1000), nowS]
+  return [nowS - winS.value, nowS]
+}
+
+// 历史保留期：原始 7 天 / 1 分钟聚合 90 天 → 选择器最多允许 90 天，且不允许未来
+function disabledDate(d) {
+  return d.getTime() < Date.now() - 90 * 86400 * 1000 || d.getTime() > Date.now()
+}
 
 async function loadHistory() {
   // 标签页隐藏时跳过轮询（省 CPU/带宽）；回到前台由 visibilitychange 立即补刷
   if (typeof document !== 'undefined' && document.hidden) return
+  const [s, e] = currentRangeSec()
+  liveSpan.value = e - s
   try {
-    history.value = await api.history(props.id, winS.value)
-  } catch (e) { /* ignore */ }
+    if (!isCustom.value && !anchor.value && winS.value <= 3600) {
+      history.value = await api.history(props.id, winS.value)  // 短窗口走内存环形缓冲（不依赖历史存储）
+    } else {
+      history.value = await api.history(props.id, null, s, e)
+    }
+  } catch (err) { /* ignore */ }
 }
 
 function onVisibilityChange() {
@@ -601,17 +730,21 @@ const sparkPrompt = computed(() => mapTail('prompt_speed', (v) => v))
 onMounted(() => {
   loadHistory()
   loadUiCfg()
-  histTimer = setInterval(loadHistory, 5000)
+  histTimer = setInterval(() => { if (!isCustom.value) loadHistory() }, 5000)  // 自定义范围为静态历史时段，不轮询
   document.addEventListener('visibilitychange', onVisibilityChange)
   measureTabs()
   window.addEventListener('resize', measureTabs)
+  window.addEventListener('scroll', onSecScroll, { passive: true })
+  updateSecActive()
 })
 
-watch(winS, loadHistory)
+watch([winS, anchor, customRange], loadHistory)
 onBeforeUnmount(() => {
   if (histTimer) clearInterval(histTimer)
   document.removeEventListener('visibilitychange', onVisibilityChange)
   window.removeEventListener('resize', measureTabs)
+  window.removeEventListener('scroll', onSecScroll)
+  if (secRaf) cancelAnimationFrame(secRaf)
 })
 </script>
 
@@ -651,6 +784,61 @@ onBeforeUnmount(() => {
   border-color: var(--card-border);
 }
 .tab-pane { display: flex; flex-direction: column; gap: 22px; }
+/* 监控页左侧滚轮导航（iOS wheel picker）：极小、透明、贴屏幕最左侧；分区名排成 3D 圆柱，
+   中间行选中高亮，上下弯向圆柱背面渐隐，滚动时整列像滚轮一样转动 */
+.wheel {
+  position: fixed;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 64px;
+  z-index: 16;
+}
+/* 可视窗口：3D 透视 + 上下渐隐（无背景，透明） */
+.wheel-mask {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  perspective: 150px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 30%, #000 70%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 30%, #000 70%, transparent 100%);
+}
+/* 圆柱（随滚动旋转） */
+.wheel-inner {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  transition: transform .45s cubic-bezier(.22, .61, .36, 1);
+}
+/* 单个分区行：贴在圆柱面上 rotateX(角度) translateZ(半径) */
+.wheel-item {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 100%;
+  height: 20px;
+  margin-top: -10px;
+  line-height: 20px;
+  text-align: center;
+  font-family: 'JetBrains Mono', 'Roboto Mono', Consolas, monospace;
+  font-size: 7px;
+  font-weight: 500;
+  color: rgba(150, 215, 235, 0.55);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transform-origin: 50% 50%;
+  backface-visibility: hidden;
+  text-shadow: 0 0 3px rgba(0, 229, 255, 0.25);
+  transition: color .2s;
+}
+.wheel-item:hover { color: rgba(200, 248, 255, 0.9); }
+.wheel-item.on {
+  color: #eafcff;
+  font-weight: 600;
+  text-shadow: 0 0 4px rgba(0, 229, 255, 0.95), 0 0 9px rgba(0, 229, 255, 0.55);
+}
 .banner-danger {
   margin: 14px 24px 0;
   padding: 10px 16px;
@@ -714,6 +902,8 @@ onBeforeUnmount(() => {
   border-color: rgba(0, 229, 255, 0.5);
   background: rgba(0, 229, 255, 0.08);
 }
+.trend-range { flex: none; width: 300px; max-width: 300px; --el-date-editor-width: 300px; }
+.trend-range :deep(.el-range-input) { font-size: 12px; }
 .trend-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

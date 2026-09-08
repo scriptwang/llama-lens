@@ -62,9 +62,13 @@ def _gpu_series(rows: List[tuple], json_idx: int, keys) -> Dict[str, Any]:
     return out
 
 
-def _history_from_store(store, host_id: str, window: int) -> Dict[str, Any]:
+def _history_from_store(store, host_id: str, window: int,
+                        t0: Optional[int] = None, t1: Optional[int] = None) -> Dict[str, Any]:
     now = int(time.time())
-    t0, t1 = now - window, now
+    if t1 is None:
+        t1 = now
+    if t0 is None:
+        t0 = t1 - window
     series: Dict[str, Any] = {}
     if window <= RAW_MAX_WINDOW:
         tier = "raw"
@@ -118,7 +122,25 @@ async def host_overview(request: Request, host_id: str,
 @router.get("/hosts/{host_id}/history")
 async def host_history(request: Request, host_id: str,
                        window: int = Query(default=300),
+                       start: Optional[int] = None,
+                       end: Optional[int] = None,
                        user: str = Depends(get_current_user)):
+    if start is not None and end is not None:
+        # 自定义时间范围（查看指定历史时段）：必须走历史存储
+        store = request.app.state.history
+        if store is None:
+            raise HTTPException(status_code=400,
+                                 detail="自定义时间范围需要启用历史存储")
+        now = int(time.time())
+        t0 = int(start)
+        t1 = min(int(end), now)
+        if t1 - t0 < 60:
+            raise HTTPException(status_code=400, detail="时间范围太短（至少 1 分钟）")
+        if t1 - t0 > 90 * 86400:
+            raise HTTPException(status_code=400, detail="时间范围太长（最多 90 天，受历史保留期限制）")
+        if t0 < now - 90 * 86400:
+            t0 = now - 90 * 86400
+        return _history_from_store(store, host_id, t1 - t0, t0=t0, t1=t1)
     if window not in VALID_WINDOWS:
         window = 300
     if window <= MEMORY_MAX_WINDOW:

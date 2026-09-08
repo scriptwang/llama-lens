@@ -70,6 +70,9 @@ echo ==PROCS==
 ls /proc 2>/dev/null | grep -c '^[0-9]'
 echo ==SERVICE==
 systemctl show {systemd_unit} -p Description,ActiveState,SubState,ExecMainStartTimestamp,CPUUsageNSec,MemoryCurrent,MemoryPeak,NTasks 2>/dev/null
+echo ==ALLSERVICES==
+# 全部服务状态（单次 list-units，供 /api/services/state 复用，零额外 SSH）：unit=ActiveState=SubState
+systemctl list-units --type=service --all --no-legend --no-pager --full 2>/dev/null | awk 'NF>=4 {{print $1"="$3"="$4}}'
 echo ==MODELS==
 if [ -n "$PID" ]; then
   tr '\0' '\n' < /proc/$PID/cmdline 2>/dev/null | awk 'p=="--model"||p=="-m"||p=="--mmproj"{{print; p=""; next}}{{p=$0}}' | xargs -r -d '\n' ls -l 2>/dev/null
@@ -450,6 +453,29 @@ def parse_service(section: str) -> Dict[str, Any]:
     return svc
 
 
+def parse_all_services(section: str) -> Dict[str, Dict[str, str]]:
+    """==ALLSERVICES== 段：每行 unit=ActiveState=SubState → {unit: {active_state, sub_state}}。
+
+    供 /api/services/state 复用监控快照（零额外 SSH）；systemctl 不可用时返回空。
+    """
+    result: Dict[str, Dict[str, str]] = {}
+    for line in section.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split("=")
+        if len(parts) < 3:
+            continue
+        unit = parts[0].strip()
+        if not unit:
+            continue
+        result[unit] = {
+            "active_state": parts[1].strip(),
+            "sub_state": parts[2].strip(),
+        }
+    return result
+
+
 def parse_models(section: str) -> Dict[str, int]:
     """返回 {path: size_bytes}。"""
     result = {}
@@ -499,6 +525,7 @@ class SshPoller:
             "reachable": False,
             "sys": {}, "cpu": {}, "mem": {}, "disk": {}, "net": {},
             "gpus": [], "process": {"found": False}, "service": {},
+            "all_services": {},
             "top": {"cpu": [], "mem": []},
         }
         self._static_done = False
@@ -642,6 +669,7 @@ class SshPoller:
         # 服务
         m["service"] = parse_service(sec.get("SERVICE", ""))
         m["service"]["unit"] = self.cfg.systemd_unit
+        m["all_services"] = parse_all_services(sec.get("ALLSERVICES", ""))
 
         # 模型文件体积
         m["_model_sizes"] = parse_models(sec.get("MODELS", ""))

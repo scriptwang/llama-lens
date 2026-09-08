@@ -10,7 +10,6 @@
 
 <script setup>
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { baseOption, lineSeries, initChart } from '../theme/echarts-dark'
 import { themeState, palette, chartTheme } from '../theme'
 
 const props = defineProps({
@@ -22,7 +21,10 @@ const props = defineProps({
   yMax: { type: Number, default: null },
   yMin: { type: Number, default: null },
   // span: 选择的时间窗口（秒）；x 轴范围与刻度格式按它计算，无数据时坐标依然正确
-  span: { type: Number, default: null }
+  span: { type: Number, default: null },
+  // xMin/xMax: 显式 x 轴范围（毫秒时间戳，自定义时间范围用）；提供时优先于 span
+  xMin: { type: Number, default: null },
+  xMax: { type: Number, default: null }
 })
 
 const el = ref(null)
@@ -30,18 +32,28 @@ let chart = null
 let ro = null
 
 function buildOption() {
-  const opt = baseOption()
-  // x 轴按「选择的时间窗口」定范围与刻度格式（无数据时坐标依然正确）；未传 span 时退回数据跨度
-  const spanSec = props.span || dataSpan() || 3600
-  const now = Date.now()
-  opt.xAxis.min = now - spanSec * 1000
-  opt.xAxis.max = now
+  const opt = ed.baseOption()
+  // x 轴范围：显式 xMin/xMax（自定义时间范围）优先；否则按「选择的时间窗口」，未传 span 时退回数据跨度
+  let spanSec
+  if (props.xMin != null && props.xMax != null) {
+    opt.xAxis.min = props.xMin
+    opt.xAxis.max = props.xMax
+    spanSec = (props.xMax - props.xMin) / 1000
+  } else {
+    spanSec = props.span || dataSpan() || 3600
+    const now = Date.now()
+    opt.xAxis.min = now - spanSec * 1000
+    opt.xAxis.max = now
+  }
   opt.xAxis.axisLabel.formatter = (v) => formatAxisTime(v, spanSec)
   opt.series = props.series.map((s, i) => {
     const pal = palette()
     const color = s.color || pal[i % pal.length]
     const data = (s.ts || []).map((t, j) => [t * 1000, s.values[j] === null || s.values[j] === undefined ? null : s.values[j]])
-    return lineSeries(s.name, data, color, {
+    if (s.bar) {
+      return ed.barSeries(s.name, data, color, { barMaxWidth: s.barMaxWidth })
+    }
+    return ed.lineSeries(s.name, data, color, {
       step: s.step,
       area: s.area,
       stack: s.stack,
@@ -91,9 +103,13 @@ function render() {
   chart.setOption(buildOption(), { replaceMerge: ['series'] })
 }
 
+// echarts-dark 懒加载：echarts 不进首屏 vendor，仅在图表真正挂载时下载
+let ed = null
 onMounted(async () => {
   await nextTick()
-  chart = initChart(el.value)
+  ed = await import('../theme/echarts-dark')
+  if (!el.value) return // 加载期间组件已卸载
+  chart = ed.initChart(el.value)
   render()
   ro = new ResizeObserver(() => chart && chart.resize())
   ro.observe(el.value)
@@ -102,6 +118,7 @@ onMounted(async () => {
 watch(() => props.series, render, { deep: false })
 watch(() => [props.yMax, props.yMin], render)
 watch(() => props.span, render)
+watch(() => [props.xMin, props.xMax], render)
 watch(() => themeState.version, render)
 
 onBeforeUnmount(() => {

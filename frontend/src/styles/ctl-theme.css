@@ -302,6 +302,12 @@
   font-weight: 650; font-size: 14.5px; word-break: break-all;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
+.ctl-scope .svc-rename {
+  font-size: 13px; color: var(--lc-text-muted); cursor: pointer; flex: none;
+  opacity: 0; transition: opacity .15s ease, color .15s ease;
+}
+.ctl-scope .svc-head:hover .svc-rename, .ctl-scope .svc-rename:focus-visible { opacity: 1; }
+.ctl-scope .svc-rename:hover { color: var(--lc-primary); }
 .ctl-scope .svc-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--lc-text-secondary); white-space: nowrap; }
 .ctl-scope .svc-meta { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
 .ctl-scope .svc-path {

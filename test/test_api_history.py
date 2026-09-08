@@ -25,21 +25,26 @@ def test_gpu_series_skips_bad_json_and_empty():
 class FakeStore:
     def __init__(self):
         self.calls = []
+        self.ranges = []
+
+    def _rec(self, name, t0, t1, stride):
+        self.calls.append((name, stride))
+        self.ranges.append((t0, t1))
 
     def query_llama(self, host_id, t0, t1, stride=1):
-        self.calls.append(("llama", stride))
+        self._rec("llama", t0, t1, stride)
         return []
 
     def query_host(self, host_id, t0, t1, stride=1):
-        self.calls.append(("host", stride))
+        self._rec("host", t0, t1, stride)
         return []
 
     def query_llama_1m(self, host_id, t0, t1, stride=1):
-        self.calls.append(("llama_1m", stride))
+        self._rec("llama_1m", t0, t1, stride)
         return []
 
     def query_host_1m(self, host_id, t0, t1, stride=1):
-        self.calls.append(("host_1m", stride))
+        self._rec("host_1m", t0, t1, stride)
         return []
 
 
@@ -60,3 +65,16 @@ def test_history_tier_selection():
     _history_from_store(store, "h1", 604800)  # 7d → raw 层
     assert ("llama", 1008) in store.calls
     assert not any(c[0].endswith("_1m") for c in store.calls)
+
+
+def test_history_from_store_explicit_range():
+    """自定义时间范围：t0/t1 显式传入时按给定范围查询（而非 now-window）。"""
+    store = FakeStore()
+    t0, t1 = 1_000_000, 1_000_000 + 7200
+    out = _history_from_store(store, "h1", t1 - t0, t0=t0, t1=t1)
+    assert out["window"] == 7200
+    # 2h 范围走 raw 层，stride = 7200 // 600 = 12
+    assert ("llama", 12) in store.calls
+    assert ("host", 12) in store.calls
+    # 查询范围必须是显式传入的 t0/t1（而非 now-window）
+    assert store.ranges and all(r == (t0, t1) for r in store.ranges)

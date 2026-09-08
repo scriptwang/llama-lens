@@ -29,3 +29,9 @@ data/
 
 # Python venv
 .venv/
+
+# Agent 工作笔记（不入库）
+.agent-memory/
+
+# 运行时目录（密钥/数据库，不入库）
+run/

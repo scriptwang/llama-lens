@@ -16,7 +16,7 @@ from ..errors import (
     validate_unit_name,
 )
 from .auth import get_current_user
-from ..schemas import ServiceCreateReq, ServiceDuplicateReq
+from ..schemas import ServiceCreateReq, ServiceDuplicateReq, ServiceRenameReq
 from .hosts import get_host_row, host_to_conn_dict
 from ..ssh_pool import exec_cmd, pool, sftp_copy, sftp_exists, sftp_read, sftp_remove, sftp_write_atomic
 
@@ -33,6 +33,14 @@ def _get_rules() -> dict:
 def _checkout(host_id: int):
     row = get_host_row(host_id)
     return pool.checkout(host_to_conn_dict(row))
+
+
+def _monitor_for(request: Request, row):
+    """该主机对应的 HostMonitor（未启用监控/独立 ctl 模式返回 None）。"""
+    reg = getattr(request.app.state, "registry", None)
+    if reg is None:
+        return None
+    return reg.get(row["mid"])
 
 
 def _state(client, name: str) -> dict:
@@ -57,6 +65,54 @@ def list_services(host_id: int, user: str = Depends(get_current_user)):
     finally:
         pool.checkin(client)
     return ok(services)
+
+
+@router.get("/state")
+def services_state(request: Request, host_id: int, names: str = "",
+                   user: str = Depends(get_current_user)):
+    """轻量状态查询：批量取多服务 ActiveState/SubState（前端 ~1s 准实时轮询用）。
+
+    优先复用监控快照（SshPoller 每 2s 已在批量命令里采集全部服务状态，零额外 SSH）；
+    无监控/不可达/快照无数据时回退单次 SSH 批量查询。
+    """
+    name_list = []
+    for n in names.split(","):
+        n = n.strip()
+        if n and n not in name_list:
+            validate_unit_name(n)
+            name_list.append(n)
+    if not name_list:
+        return ok({})
+
+    row = get_host_row(host_id)
+    # 优先复用监控快照（零额外 SSH）：all_services 由 SshPoller 2s 批量命令维护
+    mon = _monitor_for(request, row)
+    if mon is not None:
+        all_services = mon.ssh_poller.metrics.get("all_services") or {}
+        if all_services:
+            return ok({n: st for n, st in ((n, all_services.get(n)) for n in name_list) if st})
+
+    # 回退：单条 SSH 命令批量查询（监控未启用/快照无数据时）
+    client = pool.checkout(host_to_conn_dict(row))
+    try:
+        script = "for u in %s; do echo \"== $u\"; systemctl show \"$u\" -p ActiveState -p SubState 2>/dev/null; done" % " ".join(name_list)
+        code, out, _ = exec_cmd(client, script)
+        result = {}
+        current = None
+        for line in out.splitlines():
+            line = line.strip()
+            if line.startswith("== "):
+                current = line[3:].strip()
+                result.setdefault(current, {})
+            elif current and "=" in line:
+                k, v = line.split("=", 1)
+                if k == "ActiveState":
+                    result[current]["active_state"] = v
+                elif k == "SubState":
+                    result[current]["sub_state"] = v
+        return ok(result)
+    finally:
+        pool.checkin(client)
 
 
 @router.post("")
@@ -157,6 +213,69 @@ def duplicate_service(req: ServiceDuplicateReq, name: str, host_id: int, request
     finally:
         pool.checkin(client)
     return ok({"created": path, "source": fragment, "reloaded": True})
+
+
+@router.post("/{name}/rename")
+def rename_service(req: ServiceRenameReq, name: str, host_id: int, request: Request, user: str = Depends(get_current_user)):
+    """重命名服务：单元文件改名（运行中先停，改名后以新名启动；失败自动回滚）。
+
+    仅支持 /etc/systemd/system 下的单元文件（发行版目录的文件改名会破坏包管理，
+    提示用「复制」代替）。必须先于 /{name}/{action} 注册，避免被 action 路由吞掉。
+    """
+    validate_unit_name(name)
+    new_name = req.new_name.strip()
+    if not new_name.lower().endswith(".service"):
+        new_name += ".service"
+    validate_unit_name(new_name)
+    if new_name == name:
+        raise ApiError(VALIDATION_FAILED, "新服务名不能与原服务名相同")
+    row = get_host_row(host_id)
+    client = pool.checkout(host_to_conn_dict(row))
+    try:
+        code, out, _ = exec_cmd(client, f"systemctl show {name} -p FragmentPath --value 2>/dev/null")
+        fragment = out.strip()
+        if not fragment or not sftp_exists(client, fragment):
+            raise ApiError(FILE_NOT_FOUND, f"服务文件不存在：{name}")
+        if not fragment.startswith("/etc/systemd/system/"):
+            raise ApiError(VALIDATION_FAILED,
+                           "该服务文件在发行版目录（%s），不支持改名；请用「复制」创建新服务" % fragment)
+        path = f"/etc/systemd/system/{new_name}"
+        if sftp_exists(client, path):
+            raise ApiError(FILE_EXISTS, f"服务文件已存在：{path}")
+        orig_content = sftp_read(client, fragment)
+        content = orig_content.replace(name, new_name) if name in orig_content else orig_content
+        was_active = _state(client, name).get("active_state") == "active"
+        if was_active:
+            code, out, err = systemctl(client, host_id, "stop", name, timeout=30)
+            if code != 0:
+                raise ApiError(SSH_CMD_FAILED, f"停止服务失败，无法改名：{(err or out).strip()}")
+        try:
+            sftp_write_atomic(client, path, content if content.endswith("\n") else content + "\n")
+            sftp_remove(client, fragment)
+            code, out, err = systemctl(client, host_id, "daemon-reload")
+            if code != 0:
+                raise ApiError(DAEMON_RELOAD_FAILED, f"daemon-reload 失败：{err.strip()}")
+            if was_active:
+                code, out, err = systemctl(client, host_id, "start", new_name, timeout=30)
+                if code != 0:
+                    raise ApiError(SSH_CMD_FAILED, f"以新名启动失败：{(err or out).strip()}")
+        except Exception:
+            # 回滚：还原原文件、删除新文件、reload，原运行中的服务恢复启动
+            try:
+                sftp_write_atomic(client, fragment, orig_content if orig_content.endswith("\n") else orig_content + "\n")
+                if sftp_exists(client, path):
+                    sftp_remove(client, path)
+                exec_cmd(client, "systemctl daemon-reload 2>/dev/null")
+                if was_active:
+                    systemctl(client, host_id, "start", name, timeout=30)
+            except Exception:
+                pass
+            raise
+        db.log_action(host_id, user, "rename", name, f"已重命名 {fragment} 为 {path}",
+                      request.client.host if request.client else "")
+    finally:
+        pool.checkin(client)
+    return ok({"renamed": path, "from": fragment, "reloaded": True})
 
 
 @router.post("/{name}/{action}")

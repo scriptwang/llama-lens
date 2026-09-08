@@ -115,6 +115,9 @@ class ServiceDuplicateReq(BaseModel):
     new_name: str
 
 
+class ServiceRenameReq(BaseModel):
+    new_name: str
+
 class SwitchModelReq(BaseModel):
     model_path: str
     mmproj_path: str = ""

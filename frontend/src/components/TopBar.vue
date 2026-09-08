@@ -176,7 +176,7 @@ function onModeChange(e) {
   color: var(--text-dim);
   font-size: 12px;
   font-weight: 500;
-  padding: 4px 12px;
+  padding: 4px 10px;
   border-radius: 12px;
   cursor: pointer;
   transition: color .15s, border-color .15s, background .15s;
@@ -202,7 +202,7 @@ function onModeChange(e) {
 .back { color: var(--text-dim); font-size: 13px; flex: none; }
 .back:hover { color: var(--cyan); text-decoration: none; }
 .host-info { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.hostname { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hostname { font-size: 15px; font-weight: 600; min-width: 96px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .model { color: var(--text-dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stats { display: flex; align-items: center; gap: 6px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .stats::-webkit-scrollbar { display: none; }
@@ -222,7 +222,7 @@ function onModeChange(e) {
 .stat.warn .v { color: var(--amber); }
 .stat.danger .v { color: var(--red); }
 .stat.off .v { color: var(--text-faint); }
-.right { margin-left: auto; display: flex; align-items: center; gap: 12px; flex: none; }
+.right { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
 .mode-indicator { width: 8px; height: 8px; border-radius: 50%; }
 .mode-indicator.green { background: var(--green); box-shadow: 0 0 6px var(--green); }
 .mode-indicator.amber { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
@@ -233,7 +233,7 @@ function onModeChange(e) {
   border: 1px solid var(--card-border);
   border-radius: 6px;
   font-size: 12px;
-  padding: 4px 8px;
+  padding: 4px 6px;
   outline: none;
   cursor: pointer;
 }
