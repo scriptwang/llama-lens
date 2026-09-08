@@ -25,10 +25,11 @@
           :value="t.id"
         >
           <span style="display:flex;align-items:center;gap:8px">
-            <span
-              class="theme-swatch"
-              :style="{ background: t.base.bg }"
-            />
+            <span class="theme-swatch" :style="{ background: t.base.bg }">
+              <i :style="{ background: t.colors.heading }"></i>
+              <i :style="{ background: t.colors.string, width: '72%' }"></i>
+              <i :style="{ background: t.colors.comment, width: '46%' }"></i>
+            </span>
             {{ t.label }}
           </span>
         </el-option>
@@ -144,10 +145,16 @@ onBeforeUnmount(() => {
   display: inline-flex; align-items: center; gap: 5px;
   color: var(--lc-text-muted);
 }
+/* 迷你主题预览：底色=主题背景 + 三条语法色"代码行"。
+   纯色块在明暗下拉背景上都会有一方隐形（黑块配暗底/白块配亮底），
+   内部语法色保证任何背景下都有对比，同时真实预览主题观感 */
 .theme-swatch {
-  display: inline-block; width: 16px; height: 16px; border-radius: 4px; flex: none;
-  /* 中灰描边在明/暗下拉背景上都清晰，内圈高光让浅色块在浅背景上也可辨 */
-  border: 1px solid rgba(128, 128, 128, 0.85);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  display: inline-flex; flex-direction: column; justify-content: center; gap: 2px;
+  width: 18px; height: 18px; padding: 3px; box-sizing: border-box;
+  border-radius: 4px; flex: none;
+  border: 1px solid rgba(128, 128, 128, 0.55);
+}
+.theme-swatch i {
+  display: block; height: 2px; border-radius: 1px;
 }
 </style>

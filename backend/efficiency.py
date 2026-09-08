@@ -133,14 +133,14 @@ def efficiency(host_id: str, request: Request, range: str = Query(default="7d"),
         price = float(request.app.state.registry.app_cfg.global_cfg.electricity_price or 0.0)
     except Exception:
         pass
-    days = max(1, span // DAY)
+    days = span // DAY  # <1 天为 0：日均 Token 无意义，返回 null
     out: Dict[str, Any] = {
         "range": range_name,
         "start": t0,
         "end": t1,
         "available": True,
         "tokens_total": int(tokens_total),
-        "tokens_per_day": int(tokens_total / days),
+        "tokens_per_day": int(tokens_total / days) if days >= 1 else None,
         "energy_kwh": round(energy_kwh, 3),
         "gpus": gpus,
         "tokens_per_wh": round(tokens_per_wh, 1) if tokens_per_wh is not None else None,

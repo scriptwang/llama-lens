@@ -233,7 +233,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api'
 import { useHostStream } from '../stream'
 import { totalSpeed as globalSpeed } from '../speed'
-import { fmtNum, fmtClock, fmtTokens, fmtDuration, alertLevel } from '../utils'
+import { fmtNum, fmtClock, fmtTokens, fmtDuration, alertLevel, anchorStartMs } from '../utils'
 import { chartTheme } from '../theme'
 import TopBar from '../components/TopBar.vue'
 import BarCard from '../components/BarCard.vue'
@@ -902,8 +902,10 @@ onBeforeUnmount(() => {
   border-color: rgba(0, 229, 255, 0.5);
   background: rgba(0, 229, 255, 0.08);
 }
-.trend-range { flex: none; width: 300px; max-width: 300px; --el-date-editor-width: 300px; }
-.trend-range :deep(.el-range-input) { font-size: 12px; }
+/* el-date-picker 根节点是 tooltip 触发器（fragment 渲染），父组件 scoped 属性不会落到它身上，
+   直接写 .trend-range[data-v] 永远匹配不到，必须用 :deep() 从带 scoped 属性的父级穿透 */
+.trend-title-row :deep(.el-date-editor--datetimerange) { flex: none; width: 300px; max-width: 300px; --el-date-editor-width: 300px; }
+.trend-title-row :deep(.el-range-input) { font-size: 12px; }
 .trend-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

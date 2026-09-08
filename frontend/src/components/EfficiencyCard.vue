@@ -5,10 +5,7 @@
       <span v-if="rangeLabel" class="eff-range mono" title="统计范围与「历史趋势」共用时间选择">{{ rangeLabel }}</span>
     </div>
 
-    <div v-if="tooShort" class="eff-empty">
-      效率统计需选择 ≥1 天的范围（当前 {{ shortLabel }}）——请在上方「历史趋势」选择 24h / 今日 / 本周 / 本月或更长范围
-    </div>
-    <div v-else-if="!data" class="eff-empty">
+    <div v-if="!data" class="eff-empty">
       <span v-if="loading">加载中…</span>
       <span v-else-if="data === 'none'">历史存储未启用</span>
       <span v-else>暂无数据</span>
@@ -20,7 +17,7 @@
           <div class="eff-num mono">{{ fmtTokens(data.tokens_total) }}</div>
           <div class="eff-label">Token 产出</div>
         </div>
-        <div class="eff-stat">
+        <div v-if="data.tokens_per_day != null" class="eff-stat">
           <div class="eff-num mono">{{ fmtTokens(data.tokens_per_day) }}</div>
           <div class="eff-label">日均 Token</div>
         </div>
@@ -89,14 +86,7 @@ function refreshCur() {
   cur.value = { s, e, span: e - s }
 }
 
-const tooShort = computed(() => !cur.value || cur.value.span < DAY)
 const spanSec = computed(() => (cur.value ? cur.value.span : 0))
-const shortLabel = computed(() => {
-  if (!cur.value) return ''
-  const s = cur.value.span
-  if (s < 3600) return `${Math.max(1, Math.round(s / 60))} 分钟`
-  return `${(s / 3600).toFixed(1)} 小时`
-})
 const rangeLabel = computed(() => {
   if (!cur.value) return ''
   const f = (t) => {
@@ -119,7 +109,6 @@ const powerSeries = computed(() => data.value
 
 async function load() {
   refreshCur()
-  if (tooShort.value) { data.value = null; return }
   const [s, e] = computeRange()
   const seq = ++reqSeq
   loading.value = true

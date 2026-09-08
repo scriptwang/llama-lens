@@ -12,9 +12,30 @@
       <span v-if="!info.online" class="pg-offline">llama 离线，聊天不可用</span>
     </div>
 
-    <!-- 聊天区（右侧：会话操作栏） -->
+    <!-- 聊天区 -->
     <div class="pg-chatwrap">
     <div class="pg-main">
+    <!-- 会话工具栏：左=当前会话标题，右=操作按钮（横向排列，与聊天列 768px 对齐） -->
+    <div class="pg-toolbar">
+      <span class="pg-toolbar-title" :title="curTitle">{{ curTitle }}</span>
+      <div class="pg-toolbar-actions">
+        <el-button size="small" @click="newSession"><el-icon class="pg-btn-ic"><Plus /></el-icon>新会话</el-button>
+        <el-dropdown v-if="sessionList.length > 1" trigger="click" placement="bottom-end" @command="loadSession">
+          <el-button size="small"><el-icon class="pg-btn-ic"><Clock /></el-icon>历史会话<span class="pg-sess-count">{{ sessionList.length }}</span></el-button>
+          <template #dropdown>
+            <el-dropdown-menu class="pg-sess-menu">
+              <el-dropdown-item v-for="ss in sessionList" :key="ss.id" :command="ss.id" class="pg-sess-item">
+                <span class="pg-sess-title">{{ ss.title }}</span>
+                <span class="pg-sess-time">{{ fmtTime(ss.created) }}</span>
+                <el-icon class="pg-sess-del" title="删除" @click.stop="deleteSession(ss.id)"><Delete /></el-icon>
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+        <el-button size="small" @click="openStress"><el-icon class="pg-btn-ic"><Odometer /></el-icon>推理压测</el-button>
+        <el-button v-if="chat.length" size="small" @click="clearCurrent"><el-icon class="pg-btn-ic"><Delete /></el-icon>清空当前</el-button>
+      </div>
+    </div>
     <div ref="chatBox" class="pg-chat">
       <div class="pg-col">
       <div v-if="loadingSessions && !chat.length" class="pg-empty">加载会话中…</div>
@@ -107,31 +128,6 @@
         <input ref="fileRef" type="file" accept="image/*" multiple class="pg-file" @change="onPickImages" />
       </div>
     </div>
-    </div>
-    <div class="pg-rail">
-      <el-tooltip content="新会话" placement="left">
-        <el-button class="pg-rail-btn" @click="newSession"><el-icon><Plus /></el-icon></el-button>
-      </el-tooltip>
-      <el-tooltip v-if="sessionList.length > 1" :content="`历史会话（${sessionList.length}）`" placement="left">
-        <el-dropdown trigger="click" placement="bottom-end" @command="loadSession">
-          <el-button class="pg-rail-btn"><el-icon><Clock /></el-icon></el-button>
-          <template #dropdown>
-            <el-dropdown-menu class="pg-sess-menu">
-              <el-dropdown-item v-for="ss in sessionList" :key="ss.id" :command="ss.id" class="pg-sess-item">
-                <span class="pg-sess-title">{{ ss.title }}</span>
-                <span class="pg-sess-time">{{ fmtTime(ss.created) }}</span>
-                <el-icon class="pg-sess-del" title="删除" @click.stop="deleteSession(ss.id)"><Delete /></el-icon>
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-      </el-tooltip>
-      <el-tooltip content="推理压测" placement="left">
-        <el-button class="pg-rail-btn" @click="openStress"><el-icon><Odometer /></el-icon></el-button>
-      </el-tooltip>
-      <el-tooltip v-if="chat.length" content="清空当前" placement="left">
-        <el-button class="pg-rail-btn" @click="clearCurrent"><el-icon><Delete /></el-icon></el-button>
-      </el-tooltip>
     </div>
     </div>
 
@@ -335,6 +331,10 @@ const sessionList = computed(() =>
   Object.entries(store.sessions)
     .map(([id, ss]) => ({ id, title: ss.title, created: ss.created, updated: ss.updated }))
     .sort((a, b) => (b.updated || b.created) - (a.updated || a.created)))
+const curTitle = computed(() => {
+  const s = store.sessions[store.current]
+  return s ? s.title : '新会话'
+})
 
 function newSession() {
   if (streaming.value) { ElMessage.warning('等待当前回复完成'); return }
@@ -765,12 +765,23 @@ onMounted(() => {
 }
 /* GPT 风格：居中窄栏 */
 .pg-col { max-width: 768px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
-/* 右侧会话操作栏 */
-.pg-rail { display: flex; flex-direction: column; gap: 8px; flex: none; }
-.pg-rail-btn {
-  width: 34px; height: 34px; padding: 0; flex: none;
-  display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 8px;
+/* 会话工具栏：与聊天列（768px）对齐；左标题右操作，横向等距排列 */
+.pg-toolbar {
+  width: 100%; max-width: 768px; margin: 0 auto;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.pg-toolbar-title {
+  min-width: 0; font-size: 13px; font-weight: 600; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pg-toolbar-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+/* 覆盖 Element Plus 相邻按钮 12px 左外边距，统一用容器 gap 控制间距 */
+.pg-toolbar-actions .el-button { margin-left: 0; }
+.pg-btn-ic { margin-right: 4px; vertical-align: -2px; }
+.pg-sess-count {
+  margin-left: 5px; padding: 0 5px; border-radius: 8px;
+  font-size: 11px; line-height: 16px; color: var(--text-dim);
+  background: color-mix(in srgb, var(--text) 10%, transparent);
 }
 .pg-empty { color: var(--text-faint); font-size: 13px; text-align: center; margin: auto; display: flex; flex-direction: column; gap: 8px; }
 .pg-empty-title { font-size: 20px; font-weight: 700; color: var(--text); }
