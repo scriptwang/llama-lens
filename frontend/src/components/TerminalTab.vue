@@ -7,6 +7,7 @@
       <span v-if="hostLabel" class="term-host">{{ hostLabel }}</span>
       <span class="toolbar-spacer" />
       <el-button size="small" @click="clearTerm">清屏</el-button>
+      <el-button size="small" @click="pasteText">粘贴</el-button>
       <el-button size="small" type="warning" plain :disabled="status !== 'connected'" @click="reconnect">重连</el-button>
       <el-button size="small" :type="filePanel ? 'primary' : 'default'" :plain="!filePanel" @click="filePanel = !filePanel">
         <el-icon style="margin-right:3px"><FolderOpened /></el-icon>文件
@@ -234,6 +235,42 @@ async function copyText(text) {
     return okc
   } catch { return false }
 }
+// http（非安全上下文）兜底：浮层 textarea 走浏览器原生粘贴（Chrome 下唯一可靠路径，
+// 粘贴到输入框始终放行），读值后 term.paste 发给终端 —— 不依赖 Clipboard API
+let pasteBox = null
+let pasteBoxCleanup = null
+function closePasteBox() {
+  if (pasteBoxCleanup) { pasteBoxCleanup(); pasteBoxCleanup = null }
+  if (pasteBox) { pasteBox.remove(); pasteBox = null }
+}
+function openPasteBox() {
+  closePasteBox()
+  const box = document.createElement('div')
+  box.className = 'term-paste-box'
+  const ta = document.createElement('textarea')
+  ta.placeholder = '在此按 Ctrl+V 粘贴，Enter 发送到终端（Esc 取消）'
+  box.appendChild(ta)
+  document.body.appendChild(box)
+  pasteBox = box
+  ta.focus()
+  const onKey = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault()
+      const v = ta.value
+      closePasteBox()
+      if (v) { term?.paste(v); term?.focus() }
+    } else if (e.key === 'Escape') {
+      closePasteBox()
+    }
+  }
+  const onDocDown = (e) => { if (!box.contains(e.target)) closePasteBox() }
+  pasteBoxCleanup = () => {
+    document.removeEventListener('keydown', onKey, true)
+    document.removeEventListener('mousedown', onDocDown)
+  }
+  document.addEventListener('keydown', onKey, true)
+  setTimeout(() => document.addEventListener('mousedown', onDocDown), 0)
+}
 async function pasteText() {
   term?.focus()
   try {
@@ -242,7 +279,7 @@ async function pasteText() {
       if (text) { term?.paste(text); return }
     }
   } catch { /* 继续回退 */ }
-  // 回退：聚焦 xterm 隐藏输入框触发浏览器原生粘贴（Firefox 可用；Chrome 拦截则提示）
+  // 回退：聚焦 xterm 隐藏输入框触发浏览器原生粘贴（Firefox 可用）
   try {
     const ta = term?.textarea
     if (ta) {
@@ -250,7 +287,8 @@ async function pasteText() {
       if (document.execCommand('paste')) return
     }
   } catch { /* ignore */ }
-  ElMessage.info('http 环境无法读取剪贴板，请直接在终端按 Ctrl+V 粘贴')
+  // Chrome + http：Clipboard API 不可用 → 浮层原生粘贴
+  openPasteBox()
 }
 function onContextMenu(e) {
   e.preventDefault()
@@ -513,4 +551,10 @@ onBeforeUnmount(() => {
 .fp-up-progress { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--lc-border, #eee); background: color-mix(in srgb, var(--lc-primary, #409eff) 6%, transparent); }
 .fp-up-label { font-size: 12px; color: var(--lc-text-muted, #666); max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fp-up-bar { flex: 1; }
+</style>
+
+<style>
+.term-paste-box { position: fixed; top: 18%; left: 50%; transform: translateX(-50%); width: min(560px, 82vw); z-index: 3000; background: #1e2230; border: 1px solid #444c66; border-radius: 8px; padding: 10px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); }
+.term-paste-box textarea { width: 100%; height: 96px; resize: vertical; background: #12141c; color: #d8dce8; border: 1px solid #333a4d; border-radius: 6px; padding: 8px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; outline: none; }
+.term-paste-box textarea:focus { border-color: #7aa2f7; }
 </style>
