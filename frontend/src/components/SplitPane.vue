@@ -114,7 +114,10 @@ function endDrag(e) {
 .div-v { height: 5px; cursor: row-resize; }
 .sp-pane { position: relative; flex: 1; width: 100%; height: 100%; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .sp-pane-head { height: 28px; flex-shrink: 0; display: flex; align-items: center; gap: 2px; padding: 0 4px; background: #1a1d29; border-bottom: 1px solid var(--lc-border, #2a2e3d); }
-.sp-pane.on .sp-pane-head { box-shadow: inset 0 2px 0 var(--lc-primary, #409eff); }
+.sp-pane.on .sp-pane-head {
+  background: color-mix(in srgb, var(--lc-primary, #409eff) 9%, #1a1d29);
+  box-shadow: inset 0 2px 0 color-mix(in srgb, var(--lc-primary, #409eff) 45%, transparent);
+}
 .sp-sel { flex: 1; min-width: 60px; max-width: 220px; }
 .sp-split-btn { padding: 0 4px; font-size: 12px; color: var(--lc-text-muted, #999); }
 .sp-split-btn:hover { color: var(--lc-primary, #409eff); }
