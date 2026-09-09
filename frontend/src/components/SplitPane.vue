@@ -95,7 +95,7 @@ function endDrag(e) {
       </el-button>
     </div>
     <div class="sp-pane-body" @click="emit('focus', node.sessionId)">
-      <TermSession :id="node.sessionId" :db-id="dbId" :active="active"
+      <TermSession :key="node.sessionId" :id="node.sessionId" :db-id="dbId" :active="active"
                    :tmux-name="tmuxNameOf(node.sessionId)" :host-label="hostLabel"
                    :ref="(el) => regRef(node.sessionId, el)"
                    @status="(e) => emit('status', e)" @persist="(e) => emit('persist', e)" />

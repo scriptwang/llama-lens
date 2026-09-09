@@ -26,6 +26,8 @@
       </el-button>
       <el-button size="small" type="danger" plain :disabled="!totalSessions"
                  :title="`一键关闭全部 ${totalSessions} 个终端（含正在运行的命令）`" @click="closeAll">关闭全部</el-button>
+      <el-button size="small" plain :disabled="!dbId"
+                 title="清理远端主机上不在当前标签里的孤儿终端会话（tmux），释放残留资源" @click="cleanupOrphans">清理孤儿</el-button>
     </div>
     <div class="term-body">
       <div class="term-sessions">
@@ -145,7 +147,20 @@ const activeStatusText = computed(() => ({
 }[activeStatus.value] || ''))
 
 function genTmuxName() { return 'llama-' + Math.random().toString(36).slice(2, 8) }
-function newSession() { return { id: nextSessionId++, title: `终端 ${nextSessionId - 1}`, tmuxName: genTmuxName() } }
+function usedSessionNums() {
+  const nums = new Set()
+  tabs.value.forEach((t) => t.sessions.forEach((s) => {
+    const m = s.title.match(/^终端 (\d+)$/)
+    if (m) nums.add(parseInt(m[1], 10))
+  }))
+  return nums
+}
+function newSession() {
+  const used = usedSessionNums()
+  let num = 1
+  while (used.has(num)) num++
+  return { id: nextSessionId++, title: `终端 ${num}`, tmuxName: genTmuxName() }
+}
 function onSessionStatus({ id, status }) { sessStatus.value[id] = status }
 function onSessionPersist({ id, persist }) { sessPersist.value[id] = persist }
 function focusSession(id) { if (activeTab.value && id != null) activeTab.value.activeId = id }
@@ -206,10 +221,21 @@ function defaultLayout(ids) {
 }
 
 // ---------------- 标签操作 ----------------
+function usedTabNums() {
+  const nums = new Set()
+  tabs.value.forEach((t) => {
+    const m = t.title.match(/^标签 (\d+)$/)
+    if (m) nums.add(parseInt(m[1], 10))
+  })
+  return nums
+}
 function addTab() {
   if (totalSessions.value >= props.maxSessions) return
   const s = newSession()
-  const tab = { id: nextTabId++, title: `标签 ${tabs.value.length + 1}`, sessions: [s], layout: { type: 'pane', sessionId: s.id }, activeId: s.id }
+  const used = usedTabNums()
+  let num = 1
+  while (used.has(num)) num++
+  const tab = { id: nextTabId++, title: `标签 ${num}`, sessions: [s], layout: { type: 'pane', sessionId: s.id }, activeId: s.id }
   tabs.value.push(tab)
   activeTabId.value = tab.id
   save()
@@ -262,6 +288,21 @@ function closeAll() {
     addTab()
     save()
   }).catch(() => {})
+}
+
+// 清理远端孤儿 tmux 会话：keep 收集【所有】标签正在用的会话名（非仅活动标签），避免误杀切走的标签
+async function cleanupOrphans() {
+  if (!dbId.value) return
+  const keep = tabs.value.flatMap((t) => t.sessions.map((s) => s.tmuxName))
+  try {
+    await ElMessageBox.confirm('将清理远端主机上不在当前标签里的孤儿终端会话（tmux），确定？', '清理孤儿会话', {
+      type: 'warning', confirmButtonText: '清理', cancelButtonText: '取消',
+    })
+  } catch { return }
+  try {
+    const data = await http.post(`/hosts/${dbId.value}/terminal/cleanup`, { keep })
+    ElMessage.success(`已清理 ${data?.killed?.length || 0} 个孤儿会话`)
+  } catch { /* client 已提示 */ }
 }
 
 // ---------------- 面板操作（作用于活动标签） ----------------

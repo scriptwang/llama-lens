@@ -365,3 +365,29 @@ def delete_file(host_id: int, path: str, user: str = Depends(get_current_user)):
         return ok({"path": p})
     finally:
         pool.checkin(client)
+
+
+# ---------------- 孤儿会话清理 ----------------
+# 终端跑在 tmux 里以支持刷新恢复；若用户清 localStorage/换浏览器，远端 llama-* 会话会越积越多。
+# 前端传入当前所有标签正在用的会话名（keep），这里杀掉不在 keep 里的 llama-* 会话（安全：只动 llama- 前缀）。
+
+class CleanupReq(BaseModel):
+    keep: list = []
+
+
+@router.post("/{host_id}/terminal/cleanup")
+def cleanup_sessions(host_id: int, req: CleanupReq, user: str = Depends(get_current_user)):
+    row = get_host_row(host_id)
+    client = pool.checkout(host_to_conn_dict(row))
+    try:
+        out = _tmux_exec(client, "tmux ls -F '#{session_name}' 2>/dev/null") or ""
+        keep = set(str(x) for x in (req.keep or []))
+        killed = []
+        for name in out.splitlines():
+            name = name.strip()
+            if name.startswith("llama-") and name not in keep:
+                _tmux_exec(client, f"tmux kill-session -t {shlex.quote(name)}")
+                killed.append(name)
+        return ok({"killed": killed})
+    finally:
+        pool.checkin(client)
