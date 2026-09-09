@@ -212,6 +212,7 @@
         :host-id="props.id"
         :active="currentTab === 'terminal'"
         :host-label="hostName"
+        :max-sessions="uiCfg.terminal_max_sessions || 20"
       />
 
       <!-- ============ 模型 Tab（P0-2：清单 + 适配预估 + 一键切换） ============ -->

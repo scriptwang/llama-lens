@@ -30,8 +30,9 @@ const props = defineProps({
   dbId: { type: Number, default: null },
   active: Boolean,
   hostLabel: { type: String, default: '' },
+  tmuxName: { type: String, default: '' },
 })
-const emit = defineEmits(['status'])
+const emit = defineEmits(['status', 'persist'])
 
 const termHost = ref(null)
 const status = ref('idle')  // idle | connecting | connected | closed | error
@@ -46,7 +47,8 @@ watch(status, (v) => emit('status', { id: props.id, status: v }))
 function wsUrl() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   const token = encodeURIComponent(localStorage.getItem('llama_token') || '')
-  return `${proto}://${location.host}/api/hosts/${props.dbId}/terminal/ws?token=${token}`
+  const sess = props.tmuxName ? `&session=${encodeURIComponent(props.tmuxName)}` : ''
+  return `${proto}://${location.host}/api/hosts/${props.dbId}/terminal/ws?token=${token}${sess}`
 }
 
 function initTerm() {
@@ -117,7 +119,7 @@ function connect() {
     try { m = JSON.parse(ev.data) } catch { return }
     if (m.type === 'output') term?.write(m.data)
     else if (m.type === 'status') {
-      if (m.state === 'ready') status.value = 'connected'
+      if (m.state === 'ready') { status.value = 'connected'; emit('persist', { id: props.id, persist: !!m.persist }) }
       else if (m.state === 'closed') status.value = 'closed'
       else if (m.state === 'error') { status.value = 'error'; errMsg.value = m.reason || '' }
     }
@@ -128,6 +130,12 @@ function connect() {
 
 function reconnect() { connect() }
 function clearTerm() { term?.clear() }
+// 关闭标签时通知后端杀 tmux 会话（WS 断开本身不杀，刷新后要重连恢复）
+function kill() {
+  if (props.tmuxName && ws && ws.readyState === WebSocket.OPEN) {
+    try { ws.send(JSON.stringify({ type: 'kill' })) } catch { /* ignore */ }
+  }
+}
 
 // ---------------- 剪贴板（右键：有选区=复制，无选区=粘贴；选中即复制） ----------------
 // 兼容非安全上下文（http://dev.lan）：Clipboard API 不可用时回退 execCommand
@@ -139,6 +147,7 @@ async function copyText(text) {
     }
   } catch { /* 继续回退 */ }
   try {
+    const prev = document.activeElement
     const ta = document.createElement('textarea')
     ta.value = text
     ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0'
@@ -147,6 +156,8 @@ async function copyText(text) {
     ta.select()
     const okc = document.execCommand('copy')
     ta.remove()
+    // 回退路径会偷焦点：不还原则终端收不到按键（vim 里表现为"卡住"）
+    if (prev && prev !== document.body && prev.focus) prev.focus()
     return okc
   } catch { return false }
 }
@@ -248,7 +259,7 @@ onBeforeUnmount(() => {
   term?.dispose()
 })
 
-defineExpose({ clear: clearTerm, reconnect, paste: pasteText })
+defineExpose({ clear: clearTerm, reconnect, paste: pasteText, kill })
 </script>
 
 <style scoped>

@@ -7,6 +7,8 @@
 import asyncio
 import json
 import os
+import queue
+import re
 import shlex
 import stat as statmod
 import threading
@@ -39,6 +41,30 @@ def _ws_user(token: Optional[str]) -> str:
     return payload.get("sub") or ""
 
 
+# ---------------- 会话保持（tmux） ----------------
+# 终端跑在 tmux 会话里：页面刷新/面板重启后重连即恢复原场景（命令历史、运行中程序都在）。
+# 主机无 tmux 时自动回退普通 shell（功能可用但不保持）。
+_TMUX_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _tmux_exec(client, cmd: str) -> Optional[str]:
+    """独立通道跑短命令（tmux 探测/杀会话），不占用主 shell 通道。"""
+    try:
+        ch = client.get_transport().open_session()
+        ch.settimeout(5)
+        ch.exec_command(cmd)
+        out = ch.makefile("rb").read(4096).decode("utf-8", "replace")
+        ch.close()
+        return out
+    except Exception:
+        return None
+
+
+def _has_tmux(client) -> bool:
+    out = _tmux_exec(client, "command -v tmux")
+    return bool(out and out.strip())
+
+
 def _norm_path(path: str) -> str:
     p = os.path.normpath(path or "/")
     if not p.startswith("/"):
@@ -47,12 +73,14 @@ def _norm_path(path: str) -> str:
 
 
 @router.websocket("/{host_id}/terminal/ws")
-async def terminal_ws(ws: WebSocket, host_id: int, token: Optional[str] = None):
+async def terminal_ws(ws: WebSocket, host_id: int, token: Optional[str] = None,
+                      session: Optional[str] = None):
     await ws.accept()
     client = None
     channel = None
     stop = threading.Event()
     loop = asyncio.get_running_loop()
+    input_q: "queue.Queue" = queue.Queue()
 
     async def send(obj: dict):
         try:
@@ -69,10 +97,18 @@ async def terminal_ws(ws: WebSocket, host_id: int, token: Optional[str] = None):
         await ws.close()
         return
 
+    # 会话保持：tmux 会话名（前端生成并持久化）；非法名忽略 → 普通 shell
+    tmux_name = session if (session and _TMUX_NAME_RE.match(session)) else None
+    persist = False
     try:
         channel = client.get_transport().open_session()
         channel.get_pty(term="xterm-256color", width=80, height=24)
-        channel.invoke_shell()
+        if tmux_name and await asyncio.to_thread(_has_tmux, client):
+            # -A 存在则附着、不存在则新建；-D 踢掉其他客户端（保证本连接是唯一客户端）
+            channel.exec_command(f"tmux new-session -A -D -s {tmux_name}")
+            persist = True
+        else:
+            channel.invoke_shell()
         # 不设 recv 超时：reader 线程阻塞等待，shell 空闲不中断；WS 断开时 close channel 使其退出
     except Exception as e:
         await send({"type": "status", "state": "error", "reason": f"打开 shell 失败：{e}"})
@@ -99,8 +135,28 @@ async def terminal_ws(ws: WebSocket, host_id: int, token: Optional[str] = None):
         except Exception:
             pass
 
+    def writer():
+        # 输入/resize 走独立线程：paramiko sendall 是阻塞调用，通道缓冲满时（远端暂不读，
+        # 如 vim -- More -- / 慢操作）绝不能阻塞事件循环，否则整个面板卡死
+        while not stop.is_set():
+            try:
+                item = input_q.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            if item is None:
+                break
+            try:
+                kind, payload = item
+                if kind == "in":
+                    channel.sendall(payload)
+                else:
+                    channel.resize_pty(payload[0], payload[1])
+            except Exception:
+                break
+
     threading.Thread(target=reader, daemon=True).start()
-    await send({"type": "status", "state": "ready"})
+    threading.Thread(target=writer, daemon=True).start()
+    await send({"type": "status", "state": "ready", "persist": persist})
 
     try:
         while True:
@@ -113,19 +169,20 @@ async def terminal_ws(ws: WebSocket, host_id: int, token: Optional[str] = None):
             if mtype == "input":
                 data = m.get("data", "")
                 if data:
-                    try:
-                        channel.sendall(data.encode("utf-8"))
-                    except Exception:
-                        break
+                    input_q.put(("in", data.encode("utf-8")))
             elif mtype == "resize":
                 try:
-                    channel.resize_pty(int(m.get("cols", 80)), int(m.get("rows", 24)))
-                except Exception:
+                    input_q.put(("resize", (int(m.get("cols", 80)), int(m.get("rows", 24)))))
+                except (TypeError, ValueError):
                     pass
+            elif mtype == "kill" and tmux_name:
+                # 前端关闭标签时显式杀 tmux 会话；WS 断开本身不杀（刷新后要重连恢复）
+                await asyncio.to_thread(_tmux_exec, client, f"tmux kill-session -t {tmux_name}")
     except WebSocketDisconnect:
         pass
     finally:
         stop.set()
+        input_q.put(None)
         for closer in (lambda: channel.close(), lambda: client.close()):
             try:
                 closer()

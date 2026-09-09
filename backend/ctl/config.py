@@ -39,6 +39,13 @@ def _bool(v, default):
     return str(v).strip().lower() not in ("false", "0", "no", "off")
 
 
+def _int(v, default):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
+
 def _ui_config() -> dict:
     """config.yaml ui 段：顶部 TAB 显隐 + 监控页自动浏览默认开关（缺省全开/关）"""
     ui = _yaml.get("ui") if isinstance(_yaml.get("ui"), dict) else {}
@@ -57,6 +64,7 @@ def _ui_config() -> dict:
         "auto_browse": {
             "enabled": _bool(ab.get("enabled"), False),
         },
+        "terminal_max_sessions": _int(ui.get("terminal_max_sessions"), 20),
     }
 
 
