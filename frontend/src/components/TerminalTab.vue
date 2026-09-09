@@ -6,15 +6,14 @@
       </span>
       <span v-if="hostLabel" class="term-host-label">{{ hostLabel }}</span>
       <div class="term-tabs">
-        <div v-for="s in sessions" :key="s.id" class="term-tab" :class="{ on: s.id === activeId }"
-             :title="s.title + '（双击重命名）'" @click="focusSession(s.id)" @dblclick="renameSession(s)">
-          <span class="tt-dot" :class="'st-' + (sessStatus[s.id] || 'idle')" />
-          <span class="tt-title">{{ s.title }}</span>
-          <span v-if="sessPersist[s.id]" class="tt-persist" title="会话保持：刷新页面后场景恢复">保</span>
-          <el-icon class="tt-close" @click.stop="closeSession(s.id)"><Close /></el-icon>
+        <div v-for="t in tabs" :key="t.id" class="term-tab" :class="{ on: t.id === activeTabId }"
+             :title="t.title + '（双击重命名）'" @click="switchTab(t.id)" @dblclick="renameTab(t)">
+          <span class="tt-title">{{ t.title }}</span>
+          <span v-if="t.sessions.length > 1" class="tt-count" :title="'已分屏 ' + t.sessions.length + ' 个终端'">{{ t.sessions.length }}</span>
+          <el-icon class="tt-close" @click.stop="closeTab(t.id)"><Close /></el-icon>
         </div>
-        <el-button class="tt-add" size="small" :disabled="sessions.length >= maxSessions"
-                   :title="sessions.length >= maxSessions ? `最多 ${maxSessions} 个终端（config.yaml ui.terminal_max_sessions 可调）` : '新建终端'" @click="addSession">
+        <el-button class="tt-add" size="small" :disabled="totalSessions >= maxSessions"
+                   :title="totalSessions >= maxSessions ? `最多 ${maxSessions} 个终端（config.yaml ui.terminal_max_sessions 可调）` : '新建标签（全屏终端，可再内部分屏）'" @click="addTab">
           <el-icon><Plus /></el-icon>
         </el-button>
       </div>
@@ -25,16 +24,19 @@
       <el-button size="small" :type="filePanel ? 'primary' : 'default'" :plain="!filePanel" @click="filePanel = !filePanel">
         <el-icon style="margin-right:3px"><FolderOpened /></el-icon>文件
       </el-button>
+      <el-button size="small" type="danger" plain :disabled="!totalSessions"
+                 :title="`一键关闭全部 ${totalSessions} 个终端（含正在运行的命令）`" @click="closeAll">关闭全部</el-button>
     </div>
     <div class="term-body">
       <div class="term-sessions">
-        <SplitPane v-if="layout" :node="layout" :sessions="sessions" :db-id="dbId" :active="active"
-                   :host-label="hostLabel" :active-id="activeId" :max-sessions="maxSessions"
-                   @split="splitPane" @close="(n) => closeSession(n.sessionId)" @pick="pickSession"
+        <SplitPane v-if="activeTab && activeTab.layout" :node="activeTab.layout" :sessions="activeTab.sessions"
+                   :db-id="dbId" :active="active" :host-label="hostLabel" :active-id="activeTab.activeId"
+                   :max-sessions="maxSessions"
+                   @split="splitPane" @close="closePane" @pick="pickSession"
                    @status="onSessionStatus" @persist="onSessionPersist" @focus="focusSession" />
         <div v-else class="term-empty">
-          <span>暂无终端会话</span>
-          <el-button size="small" type="primary" @click="addSession">新建终端</el-button>
+          <span>暂无终端</span>
+          <el-button size="small" type="primary" @click="addTab">新建标签</el-button>
         </div>
       </div>
       <aside v-if="filePanel" class="file-panel">
@@ -117,38 +119,38 @@ const props = defineProps({
   maxSessions: { type: Number, default: 20 },
 })
 
-// ---------------- 多终端会话 + 树状分屏布局 ----------------
-// 每个会话 = 独立 xterm + 独立 WS + 后端独立 tmux 会话（刷新后重连恢复场景）
-// 布局是一棵二叉树：叶子=面板(绑定一个会话)，内部节点=分屏(方向 h/v + 可拖动比例 ratio)
-let nextSessionId = 1  // 模块级自增：id 全局唯一，避免切换主机后 Vue 复用旧实例
+// ---------------- 多标签 + 每标签独立树状分屏 ----------------
+// 每个标签(TAB) = 一个独立工作区：可全屏(1 终端)或内部分屏(多终端)
+// 标签内布局是二叉树：叶子=面板(绑定一个终端)，内部节点=分屏(方向 h/v + 可拖动比例)
+// 每个终端 = 独立 xterm + 独立 WS + 后端独立 tmux 会话（刷新/切标签后重连恢复场景）
+let nextTabId = 1
+let nextSessionId = 1
 const SESSIONS_KEY = 'llama_term_sessions'
-const sessions = ref([])
-const activeId = ref(null)
+const tabs = ref([])            // [{id, title, sessions:[{id,title,tmuxName}], layout, activeId}]
+const activeTabId = ref(null)
+const sessionRefs = reactive({})  // 会话实例注册表（provide 给 SplitPane 注册 TermSession）
 const sessStatus = ref({})
 const sessPersist = ref({})
-const sessionRefs = reactive({})  // 会话实例注册表（provide 给 SplitPane 注册 TermSession）
-const layout = ref(null)          // 分屏布局树
 const dbId = ref(null)
 const filePanel = ref(false)
 
 provide('termRegistry', sessionRefs)
 
-const activeSession = computed(() => sessionRefs[activeId.value] || null)
-const activeStatus = computed(() => sessStatus.value[activeId.value] || 'idle')
+const activeTab = computed(() => tabs.value.find((t) => t.id === activeTabId.value) || null)
+const totalSessions = computed(() => tabs.value.reduce((n, t) => n + t.sessions.length, 0))
+const activeSession = computed(() => (activeTab.value ? sessionRefs[activeTab.value.activeId] || null : null))
+const activeStatus = computed(() => (activeTab.value ? sessStatus.value[activeTab.value.activeId] || 'idle' : 'idle'))
 const activeStatusText = computed(() => ({
   idle: '未连接', connecting: '连接中', connected: '已连接', closed: '已断开', error: '连接失败',
 }[activeStatus.value] || ''))
 
-function genTmuxName() {
-  return 'llama-' + Math.random().toString(36).slice(2, 8)
-}
+function genTmuxName() { return 'llama-' + Math.random().toString(36).slice(2, 8) }
+function newSession() { return { id: nextSessionId++, title: `终端 ${nextSessionId - 1}`, tmuxName: genTmuxName() } }
 function onSessionStatus({ id, status }) { sessStatus.value[id] = status }
 function onSessionPersist({ id, persist }) { sessPersist.value[id] = persist }
-function focusSession(id) {
-  if (id != null) activeId.value = id
-}
+function focusSession(id) { if (activeTab.value && id != null) activeTab.value.activeId = id }
 
-// ---------------- 布局树操作 ----------------
+// ---------------- 布局树操作（作用于某标签的 layout） ----------------
 function findLeaf(node, sessionId) {
   if (!node) return null
   if (node.type === 'pane') return node.sessionId === sessionId ? node : null
@@ -203,106 +205,159 @@ function defaultLayout(ids) {
   return node
 }
 
-// ---------------- 会话增删 + 分屏 ----------------
-function addSession() {
-  if (sessions.value.length >= props.maxSessions) return
-  const s = { id: nextSessionId++, title: `终端 ${sessions.value.length + 1}`, tmuxName: genTmuxName() }
-  sessions.value.push(s)
-  if (!layout.value) {
-    layout.value = { type: 'pane', sessionId: s.id }
-  } else {
-    // 在“当前活动面板”处左右分屏，新终端放右侧
-    const target = findLeaf(layout.value, activeId.value) || firstLeaf(layout.value)
-    layout.value = replaceLeaf(layout.value, target, { type: 'split', dir: 'h', ratio: 0.5, a: target, b: { type: 'pane', sessionId: s.id } })
-  }
-  activeId.value = s.id
-  saveSessions()
+// ---------------- 标签操作 ----------------
+function addTab() {
+  if (totalSessions.value >= props.maxSessions) return
+  const s = newSession()
+  const tab = { id: nextTabId++, title: `标签 ${tabs.value.length + 1}`, sessions: [s], layout: { type: 'pane', sessionId: s.id }, activeId: s.id }
+  tabs.value.push(tab)
+  activeTabId.value = tab.id
+  save()
 }
+function switchTab(id) {
+  if (id !== activeTabId.value) { activeTabId.value = id; save() }
+}
+async function renameTab(t) {
+  try {
+    const { value } = await ElMessageBox.prompt('标签名称', '重命名标签', {
+      inputValue: t.title, confirmButtonText: '保存', cancelButtonText: '取消',
+      inputValidator: (v) => (!v || !v.trim() ? '请输入名称' : true),
+    })
+    t.title = value.trim()
+    save()
+  } catch { /* 取消 */ }
+}
+function closeTab(tabId) {
+  const tab = tabs.value.find((t) => t.id === tabId)
+  if (!tab) return
+  const doClose = () => {
+    tab.sessions.forEach((s) => sessionRefs[s.id]?.kill())
+    const i = tabs.value.indexOf(tab)
+    if (i >= 0) tabs.value.splice(i, 1)
+    tab.sessions.forEach((s) => { delete sessStatus.value[s.id]; delete sessPersist.value[s.id] })
+    if (activeTabId.value === tabId) activeTabId.value = tabs.value.length ? tabs.value[tabs.value.length - 1].id : null
+    save()
+  }
+  const anyConnected = tab.sessions.some((s) => (sessStatus.value[s.id] || 'idle') === 'connected')
+  if (anyConnected) {
+    ElMessageBox.confirm(`关闭「${tab.title}」将终止其中 ${tab.sessions.length} 个终端会话（含正在运行的命令），确定关闭？`, '关闭标签', {
+      type: 'warning', confirmButtonText: '关闭', cancelButtonText: '取消',
+    }).then(doClose).catch(() => {})
+  } else doClose()
+}
+
+// 一键关闭所有终端：杀掉全部会话，重置为单个空白标签
+function closeAll() {
+  if (!totalSessions.value) return
+  ElMessageBox.confirm(`将关闭全部 ${totalSessions.value} 个终端会话（含正在运行的命令），并新建一个空白标签，确定？`, '关闭全部终端', {
+    type: 'warning', confirmButtonText: '关闭全部', cancelButtonText: '取消',
+  }).then(() => {
+    tabs.value.forEach((t) => t.sessions.forEach((s) => {
+      sessionRefs[s.id]?.kill()
+      delete sessStatus.value[s.id]
+      delete sessPersist.value[s.id]
+    }))
+    tabs.value = []
+    activeTabId.value = null
+    addTab()
+    save()
+  }).catch(() => {})
+}
+
+// ---------------- 面板操作（作用于活动标签） ----------------
 function splitPane(paneNode, dir) {
-  if (sessions.value.length >= props.maxSessions) {
+  const tab = activeTab.value
+  if (!tab) return
+  if (totalSessions.value >= props.maxSessions) {
     ElMessage.warning(`最多 ${props.maxSessions} 个终端（config.yaml ui.terminal_max_sessions 可调）`)
     return
   }
-  const s = { id: nextSessionId++, title: `终端 ${sessions.value.length + 1}`, tmuxName: genTmuxName() }
-  sessions.value.push(s)
-  layout.value = replaceLeaf(layout.value, paneNode, { type: 'split', dir: dir || 'h', ratio: 0.5, a: paneNode, b: { type: 'pane', sessionId: s.id } })
-  activeId.value = s.id
-  saveSessions()
+  const s = newSession()
+  tab.sessions.push(s)
+  tab.layout = replaceLeaf(tab.layout, paneNode, { type: 'split', dir: dir || 'h', ratio: 0.5, a: paneNode, b: { type: 'pane', sessionId: s.id } })
+  tab.activeId = s.id
+  save()
 }
-// 面板切换显示哪个终端：与目标终端所在面板交换（保持“每个终端恰在一个面板”）
+function closePane(paneNode) {
+  const tab = activeTab.value
+  if (!tab) return
+  const sess = tab.sessions.find((s) => s.id === paneNode.sessionId)
+  if (!sess) return
+  const doClose = () => {
+    sessionRefs[paneNode.sessionId]?.kill()
+    tab.layout = removeLeaf(tab.layout, paneNode.sessionId)
+    tab.sessions = tab.sessions.filter((s) => s.id !== paneNode.sessionId)
+    delete sessStatus.value[paneNode.sessionId]
+    delete sessPersist.value[paneNode.sessionId]
+    if (tab.activeId === paneNode.sessionId) {
+      const remaining = leavesOf(tab.layout)
+      tab.activeId = remaining.length ? remaining[0] : null
+    }
+    if (!tab.sessions.length) { closeTab(tab.id); return }
+    save()
+  }
+  if ((sessStatus.value[paneNode.sessionId] || 'idle') === 'connected') {
+    ElMessageBox.confirm(`关闭「${sess.title}」将终止其 shell 会话（含正在运行的命令），确定关闭？`, '关闭终端', {
+      type: 'warning', confirmButtonText: '关闭', cancelButtonText: '取消',
+    }).then(doClose).catch(() => {})
+  } else doClose()
+}
+// 面板切换显示哪个终端：与目标终端所在面板交换（限本标签内，保持“每个终端恰在一个面板”）
 function pickSession(paneNode, newId) {
-  if (newId == null || newId === paneNode.sessionId) return
-  const other = findLeaf(layout.value, newId)
+  const tab = activeTab.value
+  if (!tab || newId == null || newId === paneNode.sessionId) return
+  const other = findLeaf(tab.layout, newId)
   if (!other) return
   const oldId = paneNode.sessionId
   paneNode.sessionId = newId
   other.sessionId = oldId
-  saveSessions()
-}
-async function closeSession(sessionId) {
-  const sess = sessions.value.find((s) => s.id === sessionId)
-  if (!sess) return
-  const doClose = () => {
-    // 先通知后端杀 tmux 会话（kill 消息先于 WS 关闭帧，后端保证处理完才断开）
-    sessionRefs[sessionId]?.kill()
-    layout.value = removeLeaf(layout.value, sessionId)
-    const i = sessions.value.indexOf(sess)
-    if (i >= 0) sessions.value.splice(i, 1)
-    delete sessStatus.value[sessionId]
-    delete sessPersist.value[sessionId]
-    if (activeId.value === sessionId) {
-      const remaining = leavesOf(layout.value)
-      activeId.value = remaining.length ? remaining[0] : null
-    }
-    saveSessions()
-  }
-  if ((sessStatus.value[sessionId] || 'idle') === 'connected') {
-    ElMessageBox.confirm(`关闭「${sess.title}」将终止其 shell 会话（含正在运行的命令），确定关闭？`, '关闭终端', {
-      type: 'warning', confirmButtonText: '关闭', cancelButtonText: '取消',
-    }).then(doClose).catch(() => {})
-  } else {
-    doClose()
-  }
-}
-async function renameSession(s) {
-  try {
-    const { value } = await ElMessageBox.prompt('终端名称', '重命名终端', {
-      inputValue: s.title, confirmButtonText: '保存', cancelButtonText: '取消',
-      inputValidator: (v) => (!v || !v.trim() ? '请输入名称' : true),
-    })
-    s.title = value.trim()
-    saveSessions()
-  } catch { /* 取消 */ }
+  save()
 }
 
-// ---------------- 会话持久化（localStorage：会话 + 布局树，刷新后恢复） ----------------
-function saveSessions() {
+// ---------------- 持久化（localStorage：标签 + 各标签布局，刷新后恢复） ----------------
+function save() {
   try {
     const all = JSON.parse(localStorage.getItem(SESSIONS_KEY) || '{}')
     all[props.hostId] = {
-      sessions: sessions.value.map((s) => ({ id: s.id, title: s.title, tmuxName: s.tmuxName })),
-      activeId: activeId.value,
-      layout: layout.value,
+      tabs: tabs.value.map((t) => ({
+        id: t.id, title: t.title,
+        sessions: t.sessions.map((s) => ({ id: s.id, title: s.title, tmuxName: s.tmuxName })),
+        layout: t.layout, activeId: t.activeId,
+      })),
+      activeTabId: activeTabId.value,
     }
     localStorage.setItem(SESSIONS_KEY, JSON.stringify(all))
   } catch { /* 忽略 */ }
 }
-function loadSessions() {
+function load() {
   try {
     const all = JSON.parse(localStorage.getItem(SESSIONS_KEY) || '{}')
     const saved = all[props.hostId]
-    if (saved && Array.isArray(saved.sessions) && saved.sessions.length) {
-      const capped = saved.sessions.slice(0, props.maxSessions)
-      sessions.value = capped.map((s) => ({
-        id: (typeof s.id === 'number' ? s.id : nextSessionId++),
-        title: s.title || '终端',
-        tmuxName: s.tmuxName || genTmuxName(),
+    if (!saved) return
+    if (Array.isArray(saved.tabs) && saved.tabs.length) {
+      tabs.value = saved.tabs.map((t) => ({
+        id: t.id, title: t.title || '标签',
+        sessions: (t.sessions || []).map((s) => ({ id: s.id, title: s.title || '终端', tmuxName: s.tmuxName || genTmuxName() })),
+        layout: t.layout, activeId: t.activeId,
       }))
-      nextSessionId = Math.max(0, ...sessions.value.map((s) => s.id)) + 1
-      const validIds = new Set(sessions.value.map((s) => s.id))
-      layout.value = saved.layout ? remapLayout(saved.layout, validIds) : null
-      if (!layout.value) layout.value = defaultLayout(sessions.value.map((s) => s.id))
-      activeId.value = sessions.value.some((s) => s.id === saved.activeId) ? saved.activeId : sessions.value[0].id
+      tabs.value.forEach((t) => {
+        const valid = new Set(t.sessions.map((s) => s.id))
+        t.layout = remapLayout(t.layout, valid) || defaultLayout(t.sessions.map((s) => s.id))
+      })
+      tabs.value = tabs.value.filter((t) => t.sessions.length)
+      activeTabId.value = tabs.value.some((t) => t.id === saved.activeTabId) ? saved.activeTabId : (tabs.value[0]?.id ?? null)
+    } else if (Array.isArray(saved.sessions) && saved.sessions.length) {
+      // 旧格式（单一布局）迁移为单个标签
+      const capped = saved.sessions.slice(0, props.maxSessions)
+      const sessions = capped.map((s) => ({ id: (typeof s.id === 'number' ? s.id : nextSessionId++), title: s.title || '终端', tmuxName: s.tmuxName || genTmuxName() }))
+      const valid = new Set(sessions.map((s) => s.id))
+      const layout = (saved.layout ? remapLayout(saved.layout, valid) : null) || defaultLayout(sessions.map((s) => s.id))
+      tabs.value = [{ id: nextTabId++, title: '标签 1', sessions, layout, activeId: sessions.some((s) => s.id === saved.activeId) ? saved.activeId : sessions[0].id }]
+      activeTabId.value = tabs.value[0].id
+    }
+    if (tabs.value.length) {
+      nextSessionId = Math.max(0, ...tabs.value.flatMap((t) => t.sessions.map((s) => s.id))) + 1
+      nextTabId = Math.max(0, ...tabs.value.map((t) => t.id)) + 1
     }
   } catch { /* 忽略 */ }
 }
@@ -316,7 +371,7 @@ async function resolveDbId() {
   } catch { dbId.value = null }
 }
 
-// ---------------- 文件管理（所有会话共享，属主机级） ----------------
+// ---------------- 文件管理（所有标签共享，属主机级） ----------------
 const fpPath = ref('/')
 const fpEntries = ref([])
 const fpLoading = ref(false)
@@ -485,37 +540,36 @@ function fmtTime(ts) {
 onMounted(() => {
   resolveDbId()
   if (props.active) {
-    loadSessions()
-    if (!sessions.value.length) addSession()
+    load()
+    if (!tabs.value.length) addTab()
     if (filePanel.value) fpLoad()
   }
 })
 watch(() => props.active, (a) => {
   if (a) {
-    if (!sessions.value.length) {
-      loadSessions()
-      if (!sessions.value.length) addSession()
+    if (!tabs.value.length) {
+      load()
+      if (!tabs.value.length) addTab()
     }
     if (filePanel.value && !fpEntries.value.length) fpLoad()
   }
 })
 watch(filePanel, (v) => { if (v && dbId.value) fpLoad() })
 watch(() => props.hostId, () => {
-  // 切换主机：重建会话 + 重置布局 + 重置文件面板
-  sessions.value = []
-  activeId.value = null
+  // 切换主机：重建标签 + 重置文件面板
+  tabs.value = []
+  activeTabId.value = null
   sessStatus.value = {}
   sessPersist.value = {}
   for (const k in sessionRefs) delete sessionRefs[k]
-  layout.value = null
   dbId.value = null
   fpPath.value = '/'
   fpEntries.value = []
   fpFavs.value = []
   resolveDbId().then(() => {
     if (props.active) {
-      loadSessions()
-      if (!sessions.value.length) addSession()
+      load()
+      if (!tabs.value.length) addTab()
       if (filePanel.value) fpLoad()
     }
   })
@@ -531,16 +585,12 @@ watch(() => props.hostId, () => {
 .st-closed, .st-error { color: #ef4444; } .st-closed .st-dot, .st-error .st-dot { background: #ef4444; }
 @keyframes term-pulse { 50% { opacity: 0.3; } }
 .term-host-label { color: var(--text-dim, #888); font-size: 12px; white-space: nowrap; }
-.term-tabs { display: flex; align-items: center; gap: 6px; overflow-x: auto; max-width: 42%; padding: 2px; scrollbar-width: thin; }
+.term-tabs { display: flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; overflow-x: auto; padding: 2px; scrollbar-width: thin; }
 .term-tab { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border-radius: 6px; border: 1px solid var(--lc-border, #333); font-size: 12px; cursor: pointer; color: var(--lc-text-muted, #999); user-select: none; flex-shrink: 0; }
 .term-tab:hover { color: var(--text, #ddd); }
 .term-tab.on { background: color-mix(in srgb, var(--lc-primary, #409eff) 12%, transparent); border-color: var(--lc-primary, #409eff); color: var(--text, #eee); }
-.tt-dot { width: 7px; height: 7px; border-radius: 50%; background: #888; flex-shrink: 0; }
-.tt-dot.st-connected { background: #22c55e; }
-.tt-dot.st-connecting { background: #eab308; }
-.tt-dot.st-closed, .tt-dot.st-error { background: #ef4444; }
-.tt-title { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tt-persist { font-size: 10px; line-height: 14px; color: #22c55e; border: 1px solid color-mix(in srgb, #22c55e 40%, transparent); border-radius: 3px; padding: 0 3px; flex-shrink: 0; }
+.tt-title { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-count { font-size: 10px; line-height: 14px; color: var(--lc-primary, #409eff); border: 1px solid color-mix(in srgb, var(--lc-primary, #409eff) 40%, transparent); border-radius: 8px; padding: 0 4px; flex-shrink: 0; }
 .tt-close { font-size: 12px; color: #888; }
 .tt-close:hover { color: #ef4444; }
 .toolbar-spacer { flex: 1; }
