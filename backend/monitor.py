@@ -181,6 +181,7 @@ class HostMonitor:
         # 上下文：API 实时值（slot）优先，日志（任务结束行）兜底。
         # 注意 logst 是 LogPoller 的活引用，合并结果必须放副本，不能改原 state。
         log_snap = dict(logst)
+        log_snap.pop("task_history", None)  # 走 /tasks 专用端点，不进快照
         ctx = dict(logst.get("context") or {})
         api_ctx = llama.get("ctx") or {}
         if api_ctx.get("total"):

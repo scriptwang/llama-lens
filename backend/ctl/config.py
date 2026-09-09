@@ -51,6 +51,8 @@ def _ui_config() -> dict:
             "model": _bool(tabs.get("model"), True),
             "playground": _bool(tabs.get("playground"), True),
             "terminal": _bool(tabs.get("terminal"), True),
+            "requests": _bool(tabs.get("requests"), True),
+            "api": _bool(tabs.get("api"), True),
         },
         "auto_browse": {
             "enabled": _bool(ab.get("enabled"), False),

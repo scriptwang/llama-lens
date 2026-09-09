@@ -7,6 +7,7 @@
 - 兼容 Python 3.9。
 """
 import asyncio
+from collections import deque
 import logging
 import re
 import shlex
@@ -125,6 +126,7 @@ class LogPoller:
             "boot": {},
             "last_task": None,
             "last_prefill": None,
+            "task_history": deque(maxlen=200),
         }
         self._pid: Optional[int] = None
         self._pid_candidate: Optional[int] = None
@@ -434,7 +436,7 @@ class LogPoller:
 
         m = RE_RELEASE.search(msg)
         if m:
-            self._on_task_end(_i(m.group(2)), _i(m.group(3), 0), _i(m.group(4), 0) == 1)
+            self._on_task_end(_i(m.group(1)), _i(m.group(2)), _i(m.group(3), 0), _i(m.group(4), 0) == 1)
             return
 
         m = RE_LAUNCH.search(msg)
@@ -540,7 +542,7 @@ class LogPoller:
             ctx["pct"] = round(used / total * 100.0, 1)
             ctx["remaining"] = max(0, total - used)
 
-    def _on_task_end(self, task_id: Optional[int], n_tokens: int, truncated: bool) -> None:
+    def _on_task_end(self, slot_id: Optional[int], task_id: Optional[int], n_tokens: int, truncated: bool) -> None:
         now = time.time()
         ctx = self.state["context"]
         ctx["used"] = n_tokens
@@ -553,6 +555,7 @@ class LogPoller:
             self.state["mtp"] = dict(mtp)
 
         last_task = {
+            "slot": slot_id,
             "task_id": task_id,
             "prompt_ms": summary.get("prompt_ms"),
             "prompt_tokens": summary.get("prompt_tokens"),
@@ -586,6 +589,12 @@ class LogPoller:
         # draft acceptance），只有 release 行 → 标注"已中断"
         interrupted = not (summary.get("total_ms") or summary.get("eval_ms"))
         # 事件（EventDetector 内部按任务 ID 去重，日志与 API 双源不重复）
+        # 请求历史（内存环形队列，最多 200 条；不进快照，走 /tasks 专用端点）
+        record = dict(last_task)
+        record["ended_at"] = now
+        record["interrupted"] = interrupted
+        self.state["task_history"].append(record)
+
         self.events.task_end_with_stats(
             now, task_id,
             last_task["total_tokens"] or last_task["decoded_tokens"],

@@ -1,31 +1,38 @@
 <template>
   <div class="tab-pane term-scope">
     <div class="term-toolbar">
-      <span class="term-status" :class="'st-' + status">
-        <span class="st-dot" />{{ statusText }}
+      <span class="term-status" :class="'st-' + activeStatus">
+        <span class="st-dot" />{{ activeStatusText }}
       </span>
-      <span v-if="hostLabel" class="term-host">{{ hostLabel }}</span>
+      <span v-if="hostLabel" class="term-host-label">{{ hostLabel }}</span>
       <span class="toolbar-spacer" />
-      <el-button size="small" @click="clearTerm">清屏</el-button>
-      <el-button size="small" @click="pasteText">粘贴</el-button>
-      <el-button size="small" type="warning" plain :disabled="status !== 'connected'" @click="reconnect">重连</el-button>
+      <el-button size="small" :disabled="!activeSession" @click="activeSession?.clear()">清屏</el-button>
+      <el-button size="small" type="warning" plain :disabled="activeStatus !== 'connected'" @click="activeSession?.reconnect()">重连</el-button>
+      <el-button size="small" :disabled="!activeSession" @click="activeSession?.paste()">粘贴</el-button>
       <el-button size="small" :type="filePanel ? 'primary' : 'default'" :plain="!filePanel" @click="filePanel = !filePanel">
         <el-icon style="margin-right:3px"><FolderOpened /></el-icon>文件
       </el-button>
     </div>
+    <div class="term-tabs">
+      <div v-for="s in sessions" :key="s.id" class="term-tab" :class="{ on: s.id === activeId }"
+           :title="s.title + '（双击重命名）'" @click="activeId = s.id" @dblclick="renameSession(s)">
+        <span class="tt-dot" :class="'st-' + (sessStatus[s.id] || 'idle')" />
+        <span class="tt-title">{{ s.title }}</span>
+        <el-icon class="tt-close" @click.stop="closeSession(s)"><Close /></el-icon>
+      </div>
+      <el-button class="tt-add" size="small" :disabled="sessions.length >= MAX_SESSIONS"
+                 :title="sessions.length >= MAX_SESSIONS ? '最多 ' + MAX_SESSIONS + ' 个终端' : '新建终端'" @click="addSession">
+        <el-icon><Plus /></el-icon>
+      </el-button>
+    </div>
     <div class="term-body">
-      <div class="term-host-wrap">
-        <div ref="termHost" class="term-host" @contextmenu.prevent="onContextMenu" />
-        <div v-if="status === 'idle' || status === 'connecting'" class="term-overlay">
-          <span v-if="status === 'connecting'">正在连接 {{ hostLabel || '服务器' }} …</span>
-          <template v-else>
-            <span>终端未连接</span>
-            <el-button size="small" type="primary" @click="connect">连接</el-button>
-          </template>
-        </div>
-        <div v-else-if="status === 'error' || status === 'closed'" class="term-overlay">
-          <span>{{ status === 'error' ? (errMsg || '连接失败') : '会话已结束' }}</span>
-          <el-button size="small" type="primary" @click="reconnect">重新连接</el-button>
+      <div class="term-sessions">
+        <TermSession v-for="s in sessions" :key="s.id" :id="s.id" :db-id="dbId"
+                     :active="s.id === activeId && active" v-show="s.id === activeId"
+                     :host-label="hostLabel" :ref="(el) => setSessionRef(s.id, el)" @status="onSessionStatus" />
+        <div v-if="!sessions.length" class="term-empty">
+          <span>暂无终端会话</span>
+          <el-button size="small" type="primary" @click="addSession">新建终端</el-button>
         </div>
       </div>
       <aside v-if="filePanel" class="file-panel">
@@ -93,17 +100,13 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index.mjs'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs'
-import { Terminal } from '@xterm/xterm'
-import { FitAddon } from '@xterm/addon-fit'
-import { WebLinksAddon } from '@xterm/addon-web-links'
-import { ClipboardAddon } from '@xterm/addon-clipboard'
 import { Search, Star } from '@element-plus/icons-vue'
-import '@xterm/xterm/css/xterm.css'
 import http from '../api/client'
 import { api } from '../api'
+import TermSession from './TermSession.vue'
 
 const props = defineProps({
   hostId: String,
@@ -111,199 +114,68 @@ const props = defineProps({
   hostLabel: { type: String, default: '' },
 })
 
-// ---------------- 终端 ----------------
-const termHost = ref(null)
-const status = ref('idle')  // idle | connecting | connected | closed | error
-const errMsg = ref('')
+// ---------------- 多终端会话管理 ----------------
+// 每个会话 = 独立 xterm + 独立 WS + 后端独立 SSH shell；后台会话保持连接，任务继续跑
+const MAX_SESSIONS = 6
+let nextSessionId = 1  // 模块级自增：id 全局唯一，避免切换主机后 Vue 复用旧实例
+const sessions = ref([])
+const activeId = ref(null)
+const sessStatus = ref({})
+const sessionRefs = ref({})
+const dbId = ref(null)
 const filePanel = ref(false)
-let term = null
-let fit = null
-let ws = null
-let ro = null
-let dbId = null
 
-const statusText = computed(() => ({
+const activeSession = computed(() => sessionRefs.value[activeId.value] || null)
+const activeStatus = computed(() => sessStatus.value[activeId.value] || 'idle')
+const activeStatusText = computed(() => ({
   idle: '未连接', connecting: '连接中', connected: '已连接', closed: '已断开', error: '连接失败',
-}[status.value] || ''))
+}[activeStatus.value] || ''))
 
-function wsUrl() {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  const token = encodeURIComponent(localStorage.getItem('llama_token') || '')
-  return `${proto}://${location.host}/api/hosts/${dbId}/terminal/ws?token=${token}`
+function setSessionRef(id, el) {
+  if (el) sessionRefs.value[id] = el
+  else delete sessionRefs.value[id]
 }
-
-function initTerm() {
-  if (term || !termHost.value) return
-  term = new Terminal({
-    cursorBlink: true,
-    fontSize: 14,
-    fontFamily: 'ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace',
-    theme: {
-      background: '#161822',
-      foreground: '#d8dce8',
-      cursor: '#7aa2f7',
-      selectionBackground: '#3d4466',
-    },
-    scrollback: 5000,
-    allowProposedApi: true,
-  })
-  fit = new FitAddon()
-  term.loadAddon(fit)
-  term.loadAddon(new WebLinksAddon())
-  term.loadAddon(new ClipboardAddon())
-  term.open(termHost.value)
-  fit.fit()
-  // Ctrl/Cmd+C：有选区=复制（放行浏览器原生 copy 事件），无选区=发 ^C（SIGINT）
-  // Ctrl/Cmd+V：粘贴（放行浏览器原生 paste 事件）
-  // 默认 xterm.js 会把 Ctrl+C/V 转成 ^C/^V 发给 shell 并 preventDefault，导致复制/粘贴失效
-  term.attachCustomKeyEventHandler((ev) => {
-    if (ev.type === 'keydown' && (ev.ctrlKey || ev.metaKey) && !ev.shiftKey && !ev.altKey) {
-      if (ev.code === 'KeyC') return !term.hasSelection()
-      if (ev.code === 'KeyV') return false
-    }
-    return true
-  })
-  term.onData((d) => {
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data: d }))
-  })
-  // 选中即复制（鼠标松开时）
-  termHost.value.addEventListener('mouseup', () => {
-    const sel = term?.getSelection()
-    if (sel) void copyText(sel)
-  })
-  ro = new ResizeObserver(() => {
+function onSessionStatus({ id, status }) { sessStatus.value[id] = status }
+function addSession() {
+  if (sessions.value.length >= MAX_SESSIONS) return
+  const s = { id: nextSessionId++, title: `终端 ${sessions.value.length + 1}` }
+  sessions.value.push(s)
+  activeId.value = s.id
+}
+async function closeSession(s) {
+  if ((sessStatus.value[s.id] || 'idle') === 'connected') {
     try {
-      fit.fit()
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
-      }
-    } catch { /* 隐藏时忽略 */ }
-  })
-  ro.observe(termHost.value)
-}
-
-function connect() {
-  if (!dbId) return
-  if (ws) { try { ws.close() } catch { /* ignore */ } ws = null }
-  term?.clear()
-  errMsg.value = ''
-  status.value = 'connecting'
-  ws = new WebSocket(wsUrl())
-  ws.onopen = () => {
-    if (term) ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
+      await ElMessageBox.confirm(`关闭「${s.title}」将终止其 shell 会话（含正在运行的命令），确定关闭？`, '关闭终端', {
+        type: 'warning', confirmButtonText: '关闭', cancelButtonText: '取消',
+      })
+    } catch { return }
   }
-  ws.onmessage = (ev) => {
-    let m
-    try { m = JSON.parse(ev.data) } catch { return }
-    if (m.type === 'output') term?.write(m.data)
-    else if (m.type === 'status') {
-      if (m.state === 'ready') status.value = 'connected'
-      else if (m.state === 'closed') status.value = 'closed'
-      else if (m.state === 'error') { status.value = 'error'; errMsg.value = m.reason || '' }
-    }
+  const i = sessions.value.indexOf(s)
+  if (i >= 0) sessions.value.splice(i, 1)
+  delete sessStatus.value[s.id]
+  if (activeId.value === s.id) {
+    activeId.value = sessions.value.length ? sessions.value[sessions.value.length - 1].id : null
   }
-  ws.onerror = () => { if (status.value !== 'connected') { status.value = 'error'; errMsg.value = 'WebSocket 连接错误' } }
-  ws.onclose = () => { if (status.value === 'connected' || status.value === 'connecting') status.value = 'closed' }
 }
-
-function reconnect() {
-  connect()
-}
-
-function clearTerm() {
-  term?.clear()
-}
-
-// ---------------- 剪贴板（右键：有选区=复制，无选区=粘贴；选中即复制） ----------------
-// 兼容非安全上下文（http://dev.lan）：Clipboard API 不可用时回退 execCommand
-async function copyText(text) {
+async function renameSession(s) {
   try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text)
-      return true
-    }
-  } catch { /* 继续回退 */ }
-  try {
-    const ta = document.createElement('textarea')
-    ta.value = text
-    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0'
-    document.body.appendChild(ta)
-    ta.focus()
-    ta.select()
-    const okc = document.execCommand('copy')
-    ta.remove()
-    return okc
-  } catch { return false }
-}
-// http（非安全上下文）兜底：浮层 textarea 走浏览器原生粘贴（Chrome 下唯一可靠路径，
-// 粘贴到输入框始终放行），读值后 term.paste 发给终端 —— 不依赖 Clipboard API
-let pasteBox = null
-let pasteBoxCleanup = null
-function closePasteBox() {
-  if (pasteBoxCleanup) { pasteBoxCleanup(); pasteBoxCleanup = null }
-  if (pasteBox) { pasteBox.remove(); pasteBox = null }
-}
-function openPasteBox() {
-  closePasteBox()
-  const box = document.createElement('div')
-  box.className = 'term-paste-box'
-  const ta = document.createElement('textarea')
-  ta.placeholder = '在此按 Ctrl+V 粘贴，Enter 发送到终端（Esc 取消）'
-  box.appendChild(ta)
-  document.body.appendChild(box)
-  pasteBox = box
-  ta.focus()
-  const onKey = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
-      e.preventDefault()
-      const v = ta.value
-      closePasteBox()
-      if (v) { term?.paste(v); term?.focus() }
-    } else if (e.key === 'Escape') {
-      closePasteBox()
-    }
-  }
-  const onDocDown = (e) => { if (!box.contains(e.target)) closePasteBox() }
-  pasteBoxCleanup = () => {
-    document.removeEventListener('keydown', onKey, true)
-    document.removeEventListener('mousedown', onDocDown)
-  }
-  document.addEventListener('keydown', onKey, true)
-  setTimeout(() => document.addEventListener('mousedown', onDocDown), 0)
-}
-async function pasteText() {
-  term?.focus()
-  try {
-    if (navigator.clipboard?.readText) {
-      const text = await navigator.clipboard.readText()
-      if (text) { term?.paste(text); return }
-    }
-  } catch { /* 继续回退 */ }
-  // 回退：聚焦 xterm 隐藏输入框触发浏览器原生粘贴（Firefox 可用）
-  try {
-    const ta = term?.textarea
-    if (ta) {
-      ta.focus()
-      if (document.execCommand('paste')) return
-    }
-  } catch { /* ignore */ }
-  // Chrome + http：Clipboard API 不可用 → 浮层原生粘贴
-  openPasteBox()
-}
-function onContextMenu(e) {
-  e.preventDefault()
-  const sel = term?.getSelection()
-  if (sel) {
-    void copyText(sel).then((okc) => {
-      if (okc) ElMessage.success('已复制选中文本')
-      else ElMessage.warning('复制失败，请选中文字后按 Ctrl+C')
+    const { value } = await ElMessageBox.prompt('终端名称', '重命名终端', {
+      inputValue: s.title, confirmButtonText: '保存', cancelButtonText: '取消',
+      inputValidator: (v) => (!v || !v.trim() ? '请输入名称' : true),
     })
-  } else {
-    void pasteText()
-  }
+    s.title = value.trim()
+  } catch { /* 取消 */ }
+}
+async function resolveDbId() {
+  try {
+    const hosts = await api.hosts()
+    const h = hosts.find((x) => x.id === props.hostId)
+    dbId.value = h?.db_id || null
+    if (dbId.value) fpLoadFavs()
+  } catch { dbId.value = null }
 }
 
-// ---------------- 文件管理 ----------------
+// ---------------- 文件管理（所有会话共享，属主机级） ----------------
 const fpPath = ref('/')
 const fpEntries = ref([])
 const fpLoading = ref(false)
@@ -333,11 +205,11 @@ function fpJoin(base, name) {
   return base === '/' ? `/${name}` : `${base}/${name}`
 }
 async function fpLoad() {
-  if (!dbId) return
+  if (!dbId.value) return
   fpLoading.value = true
   fpQuery.value = ''
   try {
-    const data = await http.get(`/hosts/${dbId}/files`, { params: { path: fpPath.value || '/' } })
+    const data = await http.get(`/hosts/${dbId.value}/files`, { params: { path: fpPath.value || '/' } })
     fpEntries.value = data.entries || []
     fpPage.value = 1
   } catch { /* client 已提示 */ }
@@ -358,13 +230,13 @@ function fpUp() {
 function fpLoadFavs() {
   try {
     const all = JSON.parse(localStorage.getItem(FAVS_KEY) || '{}')
-    fpFavs.value = Array.isArray(all[dbId]) ? all[dbId] : []
+    fpFavs.value = Array.isArray(all[dbId.value]) ? all[dbId.value] : []
   } catch { fpFavs.value = [] }
 }
 function fpSaveFavs() {
   try {
     const all = JSON.parse(localStorage.getItem(FAVS_KEY) || '{}')
-    all[dbId] = fpFavs.value
+    all[dbId.value] = fpFavs.value
     localStorage.setItem(FAVS_KEY, JSON.stringify(all))
   } catch { /* 忽略存储失败 */ }
 }
@@ -401,7 +273,7 @@ async function onFilesPicked(ev) {
       fd.append('path', fpPath.value || '/')
       fd.append('file', f)
       // timeout:0 —— 大文件上传可能超过默认 120s，不能中途掐断
-      await http.post(`/hosts/${dbId}/files/upload`, fd, {
+      await http.post(`/hosts/${dbId.value}/files/upload`, fd, {
         timeout: 0,
         onUploadProgress: (e) => {
           if (e.total) fpUploadProgress.value = Math.min(100, Math.round((e.loaded / e.total) * 100))
@@ -426,7 +298,7 @@ async function fpMkdir() {
     name = value.trim()
   } catch { return }
   try {
-    await http.post(`/hosts/${dbId}/files/mkdir`, { path: fpJoin(fpPath.value, name) })
+    await http.post(`/hosts/${dbId.value}/files/mkdir`, { path: fpJoin(fpPath.value, name) })
     fpLoad()
   } catch { /* client 已提示 */ }
 }
@@ -438,7 +310,7 @@ async function fpDelete(e) {
     })
   } catch { return }
   try {
-    await http.delete(`/hosts/${dbId}/files`, { params: { path: p } })
+    await http.delete(`/hosts/${dbId.value}/files`, { params: { path: p } })
     ElMessage.success(`已删除 ${e.name}`)
     fpLoad()
   } catch { /* client 已提示 */ }
@@ -448,7 +320,7 @@ function fpDownload(e) {
   const p = fpJoin(fpPath.value, e.name)
   const token = encodeURIComponent(localStorage.getItem('llama_token') || '')
   const a = document.createElement('a')
-  a.href = `/api/hosts/${dbId}/files/download?path=${encodeURIComponent(p)}&token=${token}`
+  a.href = `/api/hosts/${dbId.value}/files/download?path=${encodeURIComponent(p)}&token=${token}`
   a.download = e.name
   document.body.appendChild(a)
   a.click()
@@ -469,48 +341,36 @@ function fmtTime(ts) {
 }
 
 // ---------------- 生命周期 ----------------
-onMounted(async () => {
-  initTerm()
-  try {
-    const hosts = await api.hosts()
-    const h = hosts.find((x) => x.id === props.hostId)
-    if (h?.db_id) { dbId = h.db_id; fpLoadFavs() }
-  } catch { /* 无管理数据 */ }
+onMounted(() => {
+  resolveDbId()
   if (props.active) {
-    await nextTick()
-    initTerm()
-    connect()
+    addSession()
     if (filePanel.value) fpLoad()
   }
 })
 watch(() => props.active, (a) => {
   if (a) {
-    nextTick(() => {
-      initTerm()
-      if (status.value === 'idle' || status.value === 'error' || status.value === 'closed') connect()
-      if (filePanel.value && !fpEntries.value.length) fpLoad()
-    })
+    if (!sessions.value.length) addSession()
+    if (filePanel.value && !fpEntries.value.length) fpLoad()
   }
 })
-watch(filePanel, (v) => { if (v && dbId) fpLoad() })
+watch(filePanel, (v) => { if (v && dbId.value) fpLoad() })
 watch(() => props.hostId, () => {
-  dbId = null
+  // 切换主机：重建会话 + 重置文件面板
+  sessions.value = []
+  activeId.value = null
+  sessStatus.value = {}
+  sessionRefs.value = {}
+  dbId.value = null
+  fpPath.value = '/'
+  fpEntries.value = []
   fpFavs.value = []
-  status.value = 'idle'
-  if (ws) { try { ws.close() } catch { /* ignore */ } ws = null }
-  if (props.active) {
-    ;(async () => {
-      const hosts = await api.hosts()
-      const h = hosts.find((x) => x.id === props.hostId)
-      if (h?.db_id) { dbId = h.db_id; fpLoadFavs() }
-      if (dbId) connect()
-    })()
-  }
-})
-onBeforeUnmount(() => {
-  ro?.disconnect()
-  if (ws) { try { ws.close() } catch { /* ignore */ } }
-  term?.dispose()
+  resolveDbId().then(() => {
+    if (props.active) {
+      addSession()
+      if (filePanel.value) fpLoad()
+    }
+  })
 })
 </script>
 
@@ -522,12 +382,23 @@ onBeforeUnmount(() => {
 .st-connecting { color: #eab308; } .st-connecting .st-dot { background: #eab308; animation: term-pulse 1s infinite; }
 .st-closed, .st-error { color: #ef4444; } .st-closed .st-dot, .st-error .st-dot { background: #ef4444; }
 @keyframes term-pulse { 50% { opacity: 0.3; } }
-.term-host { color: var(--text-dim, #888); font-size: 12px; }
-.term-body { display: flex; gap: 12px; align-items: stretch; }
-.term-host-wrap { position: relative; flex: 1; min-width: 0; height: calc(100vh - 190px); min-height: 420px; border-radius: 10px; overflow: hidden; border: 1px solid var(--lc-border, #333); padding: 8px 4px 4px 10px; }
-.term-host { width: 100%; height: 100%; background: #161822; }
-.term-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 12px; align-items: center; justify-content: center; background: rgba(22, 24, 34, 0.82); color: #aab; font-size: 13px; }
-.file-panel { width: 400px; flex-shrink: 0; display: flex; flex-direction: column; height: calc(100vh - 190px); min-height: 420px; border: 1px solid var(--lc-border, #333); border-radius: 10px; overflow: hidden; background: var(--lc-bg, #fff); }
+.term-host-label { color: var(--text-dim, #888); font-size: 12px; }
+.toolbar-spacer { flex: 1; }
+.term-tabs { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+.term-tab { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border-radius: 6px; border: 1px solid var(--lc-border, #333); font-size: 12px; cursor: pointer; color: var(--lc-text-muted, #999); user-select: none; }
+.term-tab:hover { color: var(--text, #ddd); }
+.term-tab.on { background: color-mix(in srgb, var(--lc-primary, #409eff) 12%, transparent); border-color: var(--lc-primary, #409eff); color: var(--text, #eee); }
+.tt-dot { width: 7px; height: 7px; border-radius: 50%; background: #888; flex-shrink: 0; }
+.tt-dot.st-connected { background: #22c55e; }
+.tt-dot.st-connecting { background: #eab308; }
+.tt-dot.st-closed, .tt-dot.st-error { background: #ef4444; }
+.tt-title { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-close { font-size: 12px; color: #888; }
+.tt-close:hover { color: #ef4444; }
+.term-body { display: flex; gap: 12px; align-items: stretch; height: calc(100vh - 228px); min-height: 420px; }
+.term-sessions { position: relative; flex: 1; min-width: 0; }
+.term-empty { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 12px; align-items: center; justify-content: center; border-radius: 10px; border: 1px solid var(--lc-border, #333); background: #161822; color: #aab; font-size: 13px; }
+.file-panel { width: 400px; flex-shrink: 0; display: flex; flex-direction: column; height: 100%; border: 1px solid var(--lc-border, #333); border-radius: 10px; overflow: hidden; background: var(--lc-bg, #fff); }
 .fp-bar { display: flex; gap: 6px; padding: 8px; border-bottom: 1px solid var(--lc-border, #eee); }
 .fp-bar .el-input { flex: 1; }
 .fp-search { padding: 8px 8px 0; }
@@ -551,10 +422,4 @@ onBeforeUnmount(() => {
 .fp-up-progress { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--lc-border, #eee); background: color-mix(in srgb, var(--lc-primary, #409eff) 6%, transparent); }
 .fp-up-label { font-size: 12px; color: var(--lc-text-muted, #666); max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fp-up-bar { flex: 1; }
-</style>
-
-<style>
-.term-paste-box { position: fixed; top: 18%; left: 50%; transform: translateX(-50%); width: min(560px, 82vw); z-index: 3000; background: #1e2230; border: 1px solid #444c66; border-radius: 8px; padding: 10px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); }
-.term-paste-box textarea { width: 100%; height: 96px; resize: vertical; background: #12141c; color: #d8dce8; border: 1px solid #333a4d; border-radius: 6px; padding: 8px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; outline: none; }
-.term-paste-box textarea:focus { border-color: #7aa2f7; }
 </style>

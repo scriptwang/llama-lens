@@ -229,6 +229,23 @@
         :active="currentTab === 'playground'"
         :host-label="hostName"
       />
+
+      <!-- ============ 请求 Tab（llama-server 请求历史明细） ============ -->
+      <RequestsTab
+        v-show="currentTab === 'requests'"
+        :host-id="props.id"
+        :active="currentTab === 'requests'"
+        :host-label="hostName"
+      />
+
+      <!-- ============ API Tab（OpenAI 兼容接入信息） ============ -->
+      <ApiAccessTab
+        v-show="currentTab === 'api'"
+        :host-id="props.id"
+        :active="currentTab === 'api'"
+        :host-label="hostName"
+        :snap="snap"
+      />
     </main>
 
     <div v-if="mode === 'paused' && currentTab === 'monitor'" class="paused-watermark"><span>已暂停</span></div>
@@ -262,6 +279,8 @@ import ServiceTab from '../components/ServiceTab.vue'
 import TerminalTab from '../components/TerminalTab.vue'
 import ModelTab from '../components/ModelTab.vue'
 import PlaygroundTab from '../components/PlaygroundTab.vue'
+import RequestsTab from '../components/RequestsTab.vue'
+import ApiAccessTab from '../components/ApiAccessTab.vue'
 import EfficiencyCard from '../components/EfficiencyCard.vue'
 import AutoBrowseBar from '../components/AutoBrowseBar.vue'
 
@@ -279,16 +298,18 @@ const TAB_DEFS = [
   { key: 'terminal', label: '终端' },
   { key: 'model', label: '模型' },
   { key: 'playground', label: '测试' },
+  { key: 'requests', label: '请求' },
+  { key: 'api', label: 'API' },
 ]
 // UI 功能开关（config.yaml ui 段）：TAB 显隐 + 自动浏览默认开关
-const uiCfg = ref({ tabs: { monitor: true, service: true, terminal: true, model: true, playground: true }, auto_browse: { enabled: false } })
+const uiCfg = ref({ tabs: { monitor: true, service: true, terminal: true, model: true, playground: true, requests: true, api: true }, auto_browse: { enabled: false } })
 async function loadUiCfg() {
   try { uiCfg.value = await api.uiConfig() } catch (e) { /* 保持默认全显 */ }
 }
 const visibleTabs = computed(() => TAB_DEFS.filter((t) => uiCfg.value.tabs && uiCfg.value.tabs[t.key] !== false))
 const tab = computed(() => {
   const t = route.query.tab
-  if (t === 'service' || t === 'terminal' || t === 'model' || t === 'playground') return t
+  if (t === 'service' || t === 'terminal' || t === 'model' || t === 'playground' || t === 'requests' || t === 'api') return t
   return 'monitor'
 })
 // 当前 Tab：路由指定的 Tab 被配置隐藏时，回退到第一个可见 Tab

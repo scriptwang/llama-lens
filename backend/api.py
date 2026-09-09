@@ -119,6 +119,20 @@ async def host_overview(request: Request, host_id: str,
     return _monitor(request, host_id).snapshot()
 
 
+@router.get("/hosts/{host_id}/tasks")
+async def host_tasks(request: Request, host_id: str,
+                     limit: int = Query(default=100, ge=1, le=200),
+                     user: str = Depends(get_current_user)):
+    """请求历史：llama-server 已完成任务的明细（时间/槽位/prompt/生成/总耗时），新→旧。"""
+    mon = _monitor(request, host_id)
+    hist = list(mon.log_poller.state.get("task_history") or [])
+    hist = hist[-limit:]
+    hist.reverse()
+    return {"host_id": host_id,
+            "log_available": bool(mon.log_poller.state.get("available")),
+            "tasks": hist}
+
+
 @router.get("/hosts/{host_id}/history")
 async def host_history(request: Request, host_id: str,
                        window: int = Query(default=300),
