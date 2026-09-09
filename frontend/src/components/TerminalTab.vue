@@ -7,11 +7,11 @@
       <span v-if="hostLabel" class="term-host-label">{{ hostLabel }}</span>
       <div class="term-tabs">
         <div v-for="s in sessions" :key="s.id" class="term-tab" :class="{ on: s.id === activeId }"
-             :title="s.title + '（双击重命名）'" @click="selectTab(s)" @dblclick="renameSession(s)">
+             :title="s.title + '（双击重命名）'" @click="focusSession(s.id)" @dblclick="renameSession(s)">
           <span class="tt-dot" :class="'st-' + (sessStatus[s.id] || 'idle')" />
           <span class="tt-title">{{ s.title }}</span>
           <span v-if="sessPersist[s.id]" class="tt-persist" title="会话保持：刷新页面后场景恢复">保</span>
-          <el-icon class="tt-close" @click.stop="closeSession(s)"><Close /></el-icon>
+          <el-icon class="tt-close" @click.stop="closeSession(s.id)"><Close /></el-icon>
         </div>
         <el-button class="tt-add" size="small" :disabled="sessions.length >= maxSessions"
                    :title="sessions.length >= maxSessions ? `最多 ${maxSessions} 个终端（config.yaml ui.terminal_max_sessions 可调）` : '新建终端'" @click="addSession">
@@ -19,7 +19,6 @@
         </el-button>
       </div>
       <span class="toolbar-spacer" />
-      <el-button size="small" :type="splitMode ? 'primary' : 'default'" :plain="!splitMode" @click="toggleSplit">分屏</el-button>
       <el-button size="small" :disabled="!activeSession" @click="activeSession?.clear()">清屏</el-button>
       <el-button size="small" type="warning" plain :disabled="activeStatus !== 'connected'" @click="activeSession?.reconnect()">重连</el-button>
       <el-button size="small" :disabled="!activeSession" @click="activeSession?.paste()">粘贴</el-button>
@@ -28,23 +27,12 @@
       </el-button>
     </div>
     <div class="term-body">
-      <div class="term-sessions" :class="{ split: splitMode }">
-        <TermSession v-for="s in sessions" :key="s.id" :id="s.id" :db-id="dbId"
-                     :active="isSessionVisible(s.id) && active" v-show="isSessionVisible(s.id)"
-                     :class="splitMode ? (s.id === leftId ? 'pane-left' : s.id === rightId ? 'pane-right' : '') : ''"
-                     :tmux-name="s.tmuxName" :host-label="hostLabel"
-                     :ref="(el) => setSessionRef(s.id, el)" @status="onSessionStatus" @persist="onSessionPersist" />
-        <div v-if="splitMode" class="pane-head pane-head-left">
-          <el-select :model-value="leftId" size="small" class="pane-sel" @change="setLeft">
-            <el-option v-for="s in sessions" :key="s.id" :label="s.title" :value="s.id" />
-          </el-select>
-        </div>
-        <div v-if="splitMode" class="pane-head pane-head-right">
-          <el-select :model-value="rightId" size="small" class="pane-sel" @change="setRight">
-            <el-option v-for="s in sessions" :key="s.id" :label="s.title" :value="s.id" />
-          </el-select>
-        </div>
-        <div v-if="!sessions.length" class="term-empty">
+      <div class="term-sessions">
+        <SplitPane v-if="layout" :node="layout" :sessions="sessions" :db-id="dbId" :active="active"
+                   :host-label="hostLabel" :active-id="activeId" :max-sessions="maxSessions"
+                   @split="splitPane" @close="(n) => closeSession(n.sessionId)" @pick="pickSession"
+                   @status="onSessionStatus" @persist="onSessionPersist" @focus="focusSession" />
+        <div v-else class="term-empty">
           <span>暂无终端会话</span>
           <el-button size="small" type="primary" @click="addSession">新建终端</el-button>
         </div>
@@ -114,13 +102,13 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, provide, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index.mjs'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs'
 import { Search, Star } from '@element-plus/icons-vue'
 import http from '../api/client'
 import { api } from '../api'
-import TermSession from './TermSession.vue'
+import SplitPane from './SplitPane.vue'
 
 const props = defineProps({
   hostId: String,
@@ -129,24 +117,23 @@ const props = defineProps({
   maxSessions: { type: Number, default: 20 },
 })
 
-// ---------------- 多终端会话管理 ----------------
-// 每个会话 = 独立 xterm + 独立 WS + 后端独立 tmux 会话（刷新页面后重连恢复场景）
+// ---------------- 多终端会话 + 树状分屏布局 ----------------
+// 每个会话 = 独立 xterm + 独立 WS + 后端独立 tmux 会话（刷新后重连恢复场景）
+// 布局是一棵二叉树：叶子=面板(绑定一个会话)，内部节点=分屏(方向 h/v + 可拖动比例 ratio)
 let nextSessionId = 1  // 模块级自增：id 全局唯一，避免切换主机后 Vue 复用旧实例
 const SESSIONS_KEY = 'llama_term_sessions'
 const sessions = ref([])
 const activeId = ref(null)
 const sessStatus = ref({})
 const sessPersist = ref({})
-const sessionRefs = ref({})
+const sessionRefs = reactive({})  // 会话实例注册表（provide 给 SplitPane 注册 TermSession）
+const layout = ref(null)          // 分屏布局树
 const dbId = ref(null)
 const filePanel = ref(false)
 
-// 分屏：左右两栏各显示一个会话（栏头下拉切换）
-const splitMode = ref(false)
-const leftId = ref(null)
-const rightId = ref(null)
+provide('termRegistry', sessionRefs)
 
-const activeSession = computed(() => sessionRefs.value[activeId.value] || null)
+const activeSession = computed(() => sessionRefs[activeId.value] || null)
 const activeStatus = computed(() => sessStatus.value[activeId.value] || 'idle')
 const activeStatusText = computed(() => ({
   idle: '未连接', connecting: '连接中', connected: '已连接', closed: '已断开', error: '连接失败',
@@ -155,77 +142,127 @@ const activeStatusText = computed(() => ({
 function genTmuxName() {
   return 'llama-' + Math.random().toString(36).slice(2, 8)
 }
-function setSessionRef(id, el) {
-  if (el) sessionRefs.value[id] = el
-  else delete sessionRefs.value[id]
-}
 function onSessionStatus({ id, status }) { sessStatus.value[id] = status }
 function onSessionPersist({ id, persist }) { sessPersist.value[id] = persist }
-function isSessionVisible(id) {
-  if (splitMode.value) return id === leftId.value || id === rightId.value
-  return id === activeId.value
+function focusSession(id) {
+  if (id != null) activeId.value = id
 }
 
-// ---------------- 会话持久化（localStorage：标题 + tmux 会话名，刷新后恢复） ----------------
-function saveSessions() {
-  try {
-    const all = JSON.parse(localStorage.getItem(SESSIONS_KEY) || '{}')
-    all[props.hostId] = {
-      sessions: sessions.value.map((s) => ({ title: s.title, tmuxName: s.tmuxName })),
-      activeId: activeId.value,
-    }
-    localStorage.setItem(SESSIONS_KEY, JSON.stringify(all))
-  } catch { /* 忽略 */ }
+// ---------------- 布局树操作 ----------------
+function findLeaf(node, sessionId) {
+  if (!node) return null
+  if (node.type === 'pane') return node.sessionId === sessionId ? node : null
+  return findLeaf(node.a, sessionId) || findLeaf(node.b, sessionId)
 }
-function loadSessions() {
-  try {
-    const all = JSON.parse(localStorage.getItem(SESSIONS_KEY) || '{}')
-    const saved = all[props.hostId]
-    if (saved && Array.isArray(saved.sessions) && saved.sessions.length) {
-      sessions.value = saved.sessions.slice(0, props.maxSessions).map((s) => ({
-        id: nextSessionId++,
-        title: s.title || '终端',
-        tmuxName: s.tmuxName || genTmuxName(),
-      }))
-      activeId.value = sessions.value.some((s) => s.id === saved.activeId)
-        ? saved.activeId
-        : sessions.value[0].id
-    }
-  } catch { /* 忽略 */ }
+function firstLeaf(node) {
+  if (!node) return null
+  if (node.type === 'pane') return node
+  return firstLeaf(node.a) || firstLeaf(node.b)
+}
+function leavesOf(node) {
+  if (!node) return []
+  if (node.type === 'pane') return [node.sessionId]
+  return [...leavesOf(node.a), ...leavesOf(node.b)]
+}
+function replaceLeaf(node, target, replacement) {
+  if (!node) return node
+  if (node === target) return replacement
+  if (node.type === 'split') {
+    return { ...node, a: replaceLeaf(node.a, target, replacement), b: replaceLeaf(node.b, target, replacement) }
+  }
+  return node
+}
+function removeLeaf(node, sessionId) {
+  if (!node) return null
+  if (node.type === 'pane') return node.sessionId === sessionId ? null : node
+  const a = removeLeaf(node.a, sessionId)
+  const b = removeLeaf(node.b, sessionId)
+  if (a === null && b === null) return null
+  if (a === null) return b
+  if (b === null) return a
+  return { ...node, a, b }
+}
+// 加载时按有效会话 id 重映射布局（被截断/缺失会话对应面板丢弃，父分屏自动折叠）
+function remapLayout(node, validIds) {
+  if (!node) return null
+  if (node.type === 'pane') return validIds.has(node.sessionId) ? { ...node } : null
+  const a = remapLayout(node.a, validIds)
+  const b = remapLayout(node.b, validIds)
+  if (a === null && b === null) return null
+  if (a === null) return b
+  if (b === null) return a
+  return { ...node, a, b }
+}
+// 无保存布局时的默认布局：等分竖向堆叠
+function defaultLayout(ids) {
+  if (!ids.length) return null
+  let node = { type: 'pane', sessionId: ids[0] }
+  for (let i = 1; i < ids.length; i++) {
+    node = { type: 'split', dir: 'v', ratio: i / (i + 1), a: node, b: { type: 'pane', sessionId: ids[i] } }
+  }
+  return node
 }
 
+// ---------------- 会话增删 + 分屏 ----------------
 function addSession() {
   if (sessions.value.length >= props.maxSessions) return
   const s = { id: nextSessionId++, title: `终端 ${sessions.value.length + 1}`, tmuxName: genTmuxName() }
   sessions.value.push(s)
+  if (!layout.value) {
+    layout.value = { type: 'pane', sessionId: s.id }
+  } else {
+    // 在“当前活动面板”处左右分屏，新终端放右侧
+    const target = findLeaf(layout.value, activeId.value) || firstLeaf(layout.value)
+    layout.value = replaceLeaf(layout.value, target, { type: 'split', dir: 'h', ratio: 0.5, a: target, b: { type: 'pane', sessionId: s.id } })
+  }
   activeId.value = s.id
-  if (splitMode.value) leftId.value = s.id
   saveSessions()
 }
-function selectTab(s) {
+function splitPane(paneNode, dir) {
+  if (sessions.value.length >= props.maxSessions) {
+    ElMessage.warning(`最多 ${props.maxSessions} 个终端（config.yaml ui.terminal_max_sessions 可调）`)
+    return
+  }
+  const s = { id: nextSessionId++, title: `终端 ${sessions.value.length + 1}`, tmuxName: genTmuxName() }
+  sessions.value.push(s)
+  layout.value = replaceLeaf(layout.value, paneNode, { type: 'split', dir: dir || 'h', ratio: 0.5, a: paneNode, b: { type: 'pane', sessionId: s.id } })
   activeId.value = s.id
-  if (splitMode.value) leftId.value = s.id
   saveSessions()
 }
-async function closeSession(s) {
-  if ((sessStatus.value[s.id] || 'idle') === 'connected') {
-    try {
-      await ElMessageBox.confirm(`关闭「${s.title}」将终止其 shell 会话（含正在运行的命令），确定关闭？`, '关闭终端', {
-        type: 'warning', confirmButtonText: '关闭', cancelButtonText: '取消',
-      })
-    } catch { return }
-  }
-  // 先通知后端杀 tmux 会话（kill 消息先于 WS 关闭帧，后端保证处理完才断开）
-  sessionRefs.value[s.id]?.kill()
-  const i = sessions.value.indexOf(s)
-  if (i >= 0) sessions.value.splice(i, 1)
-  delete sessStatus.value[s.id]
-  delete sessPersist.value[s.id]
-  if (activeId.value === s.id) {
-    activeId.value = sessions.value.length ? sessions.value[sessions.value.length - 1].id : null
-  }
-  fixSplitIds()
+// 面板切换显示哪个终端：与目标终端所在面板交换（保持“每个终端恰在一个面板”）
+function pickSession(paneNode, newId) {
+  if (newId == null || newId === paneNode.sessionId) return
+  const other = findLeaf(layout.value, newId)
+  if (!other) return
+  const oldId = paneNode.sessionId
+  paneNode.sessionId = newId
+  other.sessionId = oldId
   saveSessions()
+}
+async function closeSession(sessionId) {
+  const sess = sessions.value.find((s) => s.id === sessionId)
+  if (!sess) return
+  const doClose = () => {
+    // 先通知后端杀 tmux 会话（kill 消息先于 WS 关闭帧，后端保证处理完才断开）
+    sessionRefs[sessionId]?.kill()
+    layout.value = removeLeaf(layout.value, sessionId)
+    const i = sessions.value.indexOf(sess)
+    if (i >= 0) sessions.value.splice(i, 1)
+    delete sessStatus.value[sessionId]
+    delete sessPersist.value[sessionId]
+    if (activeId.value === sessionId) {
+      const remaining = leavesOf(layout.value)
+      activeId.value = remaining.length ? remaining[0] : null
+    }
+    saveSessions()
+  }
+  if ((sessStatus.value[sessionId] || 'idle') === 'connected') {
+    ElMessageBox.confirm(`关闭「${sess.title}」将终止其 shell 会话（含正在运行的命令），确定关闭？`, '关闭终端', {
+      type: 'warning', confirmButtonText: '关闭', cancelButtonText: '取消',
+    }).then(doClose).catch(() => {})
+  } else {
+    doClose()
+  }
 }
 async function renameSession(s) {
   try {
@@ -238,29 +275,36 @@ async function renameSession(s) {
   } catch { /* 取消 */ }
 }
 
-// ---------------- 分屏 ----------------
-function toggleSplit() {
-  if (splitMode.value) { splitMode.value = false; return }
-  if (sessions.value.length < 2) { ElMessage.info('分屏需要至少 2 个终端'); return }
-  leftId.value = activeId.value
-  rightId.value = sessions.value.find((s) => s.id !== activeId.value)?.id || null
-  splitMode.value = true
+// ---------------- 会话持久化（localStorage：会话 + 布局树，刷新后恢复） ----------------
+function saveSessions() {
+  try {
+    const all = JSON.parse(localStorage.getItem(SESSIONS_KEY) || '{}')
+    all[props.hostId] = {
+      sessions: sessions.value.map((s) => ({ id: s.id, title: s.title, tmuxName: s.tmuxName })),
+      activeId: activeId.value,
+      layout: layout.value,
+    }
+    localStorage.setItem(SESSIONS_KEY, JSON.stringify(all))
+  } catch { /* 忽略 */ }
 }
-function setLeft(id) {
-  if (id === rightId.value) { const t = leftId.value; leftId.value = id; rightId.value = t }
-  else leftId.value = id
-}
-function setRight(id) {
-  if (id === leftId.value) { const t = rightId.value; rightId.value = id; leftId.value = t }
-  else rightId.value = id
-}
-function fixSplitIds() {
-  if (!splitMode.value) return
-  const ids = sessions.value.map((s) => s.id)
-  if (!ids.includes(leftId.value)) leftId.value = ids[0] || null
-  if (!ids.includes(rightId.value) || rightId.value === leftId.value) {
-    rightId.value = ids.find((id) => id !== leftId.value) || null
-  }
+function loadSessions() {
+  try {
+    const all = JSON.parse(localStorage.getItem(SESSIONS_KEY) || '{}')
+    const saved = all[props.hostId]
+    if (saved && Array.isArray(saved.sessions) && saved.sessions.length) {
+      const capped = saved.sessions.slice(0, props.maxSessions)
+      sessions.value = capped.map((s) => ({
+        id: (typeof s.id === 'number' ? s.id : nextSessionId++),
+        title: s.title || '终端',
+        tmuxName: s.tmuxName || genTmuxName(),
+      }))
+      nextSessionId = Math.max(0, ...sessions.value.map((s) => s.id)) + 1
+      const validIds = new Set(sessions.value.map((s) => s.id))
+      layout.value = saved.layout ? remapLayout(saved.layout, validIds) : null
+      if (!layout.value) layout.value = defaultLayout(sessions.value.map((s) => s.id))
+      activeId.value = sessions.value.some((s) => s.id === saved.activeId) ? saved.activeId : sessions.value[0].id
+    }
+  } catch { /* 忽略 */ }
 }
 
 async function resolveDbId() {
@@ -457,15 +501,13 @@ watch(() => props.active, (a) => {
 })
 watch(filePanel, (v) => { if (v && dbId.value) fpLoad() })
 watch(() => props.hostId, () => {
-  // 切换主机：重建会话 + 重置文件面板
+  // 切换主机：重建会话 + 重置布局 + 重置文件面板
   sessions.value = []
   activeId.value = null
   sessStatus.value = {}
   sessPersist.value = {}
-  sessionRefs.value = {}
-  splitMode.value = false
-  leftId.value = null
-  rightId.value = null
+  for (const k in sessionRefs) delete sessionRefs[k]
+  layout.value = null
   dbId.value = null
   fpPath.value = '/'
   fpEntries.value = []
@@ -503,14 +545,8 @@ watch(() => props.hostId, () => {
 .tt-close:hover { color: #ef4444; }
 .toolbar-spacer { flex: 1; }
 .term-body { display: flex; gap: 12px; align-items: stretch; height: calc(100vh - 190px); min-height: 420px; }
-.term-sessions { position: relative; flex: 1; min-width: 0; }
-.term-sessions.split .term-host-wrap.pane-left { top: 28px; left: 0; right: calc(50% + 4px); bottom: 0; }
-.term-sessions.split .term-host-wrap.pane-right { top: 28px; left: calc(50% + 4px); right: 0; bottom: 0; }
-.pane-head { position: absolute; top: 0; height: 24px; display: flex; align-items: center; z-index: 5; }
-.pane-head-left { left: 0; width: calc(50% - 4px); }
-.pane-head-right { left: calc(50% + 4px); width: calc(50% - 4px); }
-.pane-sel { width: 100%; }
-.term-empty { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 12px; align-items: center; justify-content: center; border-radius: 10px; border: 1px solid var(--lc-border, #333); background: #161822; color: #aab; font-size: 13px; }
+.term-sessions { display: flex; flex: 1; min-width: 0; min-height: 0; }
+.term-empty { position: relative; flex: 1; display: flex; flex-direction: column; gap: 12px; align-items: center; justify-content: center; border-radius: 10px; border: 1px solid var(--lc-border, #333); background: #161822; color: #aab; font-size: 13px; }
 .file-panel { width: 400px; flex-shrink: 0; display: flex; flex-direction: column; height: 100%; border: 1px solid var(--lc-border, #333); border-radius: 10px; overflow: hidden; background: var(--lc-bg, #fff); }
 .fp-bar { display: flex; gap: 6px; padding: 8px; border-bottom: 1px solid var(--lc-border, #eee); }
 .fp-bar .el-input { flex: 1; }
