@@ -44,7 +44,7 @@
         <div class="pg-empty-sub">流式回复，自动统计 TTFT / tokens/s / 总耗时；支持图片（需模型带 mmproj）</div>
       </div>
       <div v-for="(m, i) in chat" :key="i" class="pg-msg" :class="m.role">
-        <div class="pg-role">{{ m.role === 'user' ? '你' : modelFileName }}</div>
+        <div class="pg-role">{{ m.role === 'user' ? '你' : (m.model || modelFileName) }}</div>
         <div class="pg-content" :class="{ 'is-md': m.role === 'assistant' }">
           <template v-if="m.images && m.images.length">
             <img v-for="(src, j) in m.images" :key="j" :src="src" class="pg-img" />
@@ -556,7 +556,8 @@ async function send() {
   const images = [...pendingImages.value]
   input.value = ''
   pendingImages.value = []
-  const asstMsg = { role: 'assistant', content: '', reasoning: '', metrics: null, error: '' }
+  // 记录生成时的模型名：切换模型后回看历史会话仍显示当时的模型（旧消息无此字段，回退当前模型）
+  const asstMsg = { role: 'assistant', content: '', reasoning: '', metrics: null, error: '', model: modelFileName.value }
   chat.value.push({ role: 'user', content: text, images }, asstMsg)
   // 必须通过响应式数组取 proxy 再修改，直接改原对象不触发渲染（会整段一次性显示）
   const asst = chat.value[chat.value.length - 1]

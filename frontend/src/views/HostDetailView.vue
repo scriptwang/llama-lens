@@ -206,6 +206,14 @@
         :host-label="hostName"
       />
 
+      <!-- ============ 终端 Tab（xterm.js + WebSocket 交互 shell + 文件管理） ============ -->
+      <TerminalTab
+        v-show="currentTab === 'terminal'"
+        :host-id="props.id"
+        :active="currentTab === 'terminal'"
+        :host-label="hostName"
+      />
+
       <!-- ============ 模型 Tab（P0-2：清单 + 适配预估 + 一键切换） ============ -->
       <ModelTab
         v-show="currentTab === 'model'"
@@ -251,6 +259,7 @@ import SlotTable from '../components/SlotTable.vue'
 import TrendChart from '../components/TrendChart.vue'
 import EventFeed from '../components/EventFeed.vue'
 import ServiceTab from '../components/ServiceTab.vue'
+import TerminalTab from '../components/TerminalTab.vue'
 import ModelTab from '../components/ModelTab.vue'
 import PlaygroundTab from '../components/PlaygroundTab.vue'
 import EfficiencyCard from '../components/EfficiencyCard.vue'
@@ -267,18 +276,19 @@ const router = useRouter()
 const TAB_DEFS = [
   { key: 'monitor', label: '监控' },
   { key: 'service', label: '服务' },
+  { key: 'terminal', label: '终端' },
   { key: 'model', label: '模型' },
   { key: 'playground', label: '测试' },
 ]
 // UI 功能开关（config.yaml ui 段）：TAB 显隐 + 自动浏览默认开关
-const uiCfg = ref({ tabs: { monitor: true, service: true, model: true, playground: true }, auto_browse: { enabled: false } })
+const uiCfg = ref({ tabs: { monitor: true, service: true, terminal: true, model: true, playground: true }, auto_browse: { enabled: false } })
 async function loadUiCfg() {
   try { uiCfg.value = await api.uiConfig() } catch (e) { /* 保持默认全显 */ }
 }
 const visibleTabs = computed(() => TAB_DEFS.filter((t) => uiCfg.value.tabs && uiCfg.value.tabs[t.key] !== false))
 const tab = computed(() => {
   const t = route.query.tab
-  if (t === 'service' || t === 'model' || t === 'playground') return t
+  if (t === 'service' || t === 'terminal' || t === 'model' || t === 'playground') return t
   return 'monitor'
 })
 // 当前 Tab：路由指定的 Tab 被配置隐藏时，回退到第一个可见 Tab
@@ -873,6 +883,8 @@ onBeforeUnmount(() => {
   gap: 12px;
   margin-bottom: 12px;
 }
+/* 子面板允许收缩：CPU 核心多时最小内容宽度大，不收缩会把右侧内存面板挤出视口 */
+.sys-grid > * { min-width: 0; }
 .sys-grid:last-child { margin-bottom: 0; }
 .model-grid {
   display: grid;

@@ -39,8 +39,8 @@
       <el-button size="small" type="warning" :loading="actionLoading === 'restart'" @click="$emit('action', service, 'restart')">
         <el-icon style="margin-right:3px"><RefreshRight /></el-icon>重启
       </el-button>
-      <el-button size="small" :loading="actionLoading === 'refresh'" @click="$emit('action', service, 'refresh')">
-        <el-icon style="margin-right:3px"><Refresh /></el-icon>刷新
+      <el-button size="small" type="danger" plain :loading="actionLoading === 'delete'" @click="$emit('delete', service)">
+        <el-icon style="margin-right:3px"><Delete /></el-icon>删除
       </el-button>
     </div>
     <div class="svc-actions">
@@ -66,9 +66,9 @@ import { computed } from 'vue'
 const props = defineProps({
   service: Object,
   metrics: { type: Object, default: null },
-  actionLoading: { type: String, default: '' },  // 当前进行中的动作（start/stop/restart/refresh）
+  actionLoading: { type: String, default: '' },  // 当前进行中的动作（start/stop/restart/delete）
 })
-defineEmits(['action', 'edit', 'restore', 'logs', 'duplicate', 'rename'])
+defineEmits(['action', 'edit', 'restore', 'logs', 'duplicate', 'rename', 'delete'])
 
 const isActive = computed(() => props.service.active_state === 'active')
 // 停止仅在「已停止」时禁用：启动中/停止中/失败等非停止态都允许停止（如 auto-restart 循环中服务永远不是 active，仍需可停）

@@ -191,7 +191,7 @@ def duplicate_service(req: ServiceDuplicateReq, name: str, host_id: int, request
         fragment = out.strip()
         if not fragment or not sftp_exists(client, fragment):
             raise ApiError(FILE_NOT_FOUND, f"服务文件不存在：{name}")
-        content = sftp_read(client, fragment)
+        content = req.content if req.content is not None else sftp_read(client, fragment)
         if name in content:
             content = content.replace(name, new_name)
         path = f"/etc/systemd/system/{new_name}"
@@ -276,6 +276,58 @@ def rename_service(req: ServiceRenameReq, name: str, host_id: int, request: Requ
     finally:
         pool.checkin(client)
     return ok({"renamed": path, "from": fragment, "reloaded": True})
+
+
+@router.post("/{name}/delete")
+def delete_service(name: str, host_id: int, request: Request, user: str = Depends(get_current_user)):
+    """删除服务：停止（如运行中）+ 删除单元文件 + daemon-reload。
+
+    仅支持 /etc/systemd/system 下的单元文件（发行版目录的文件由包管理持有，删除会破坏系统包）。
+    存在 .bak 备份时一并删除（避免日后同名新服务误恢复旧内容）；失败自动回滚（还原文件 + 重启原服务）。
+    必须先于 /{name}/{action} 注册，避免被 action 路由吞掉。
+    """
+    validate_unit_name(name)
+    row = get_host_row(host_id)
+    client = pool.checkout(host_to_conn_dict(row))
+    try:
+        code, out, _ = exec_cmd(client, f"systemctl show {name} -p FragmentPath --value 2>/dev/null")
+        fragment = out.strip()
+        if not fragment or not sftp_exists(client, fragment):
+            raise ApiError(FILE_NOT_FOUND, f"服务文件不存在：{name}")
+        if not fragment.startswith("/etc/systemd/system/"):
+            raise ApiError(VALIDATION_FAILED,
+                           "该服务文件在发行版目录（%s），不允许删除；请通过包管理移除" % fragment)
+        was_active = _state(client, name).get("active_state") == "active"
+        if was_active:
+            code, out, err = systemctl(client, host_id, "stop", name, timeout=30)
+            if code != 0:
+                raise ApiError(SSH_CMD_FAILED, f"停止服务失败，无法删除：{(err or out).strip()}")
+        orig_content = sftp_read(client, fragment)
+        bak = fragment + ".bak"
+        had_bak = sftp_exists(client, bak)
+        try:
+            sftp_remove(client, fragment)
+            code, out, err = systemctl(client, host_id, "daemon-reload")
+            if code != 0:
+                raise ApiError(DAEMON_RELOAD_FAILED, f"daemon-reload 失败：{err.strip()}")
+            if had_bak:
+                sftp_remove(client, bak)  # 成功后才删备份（失败时保留用于回滚）
+        except Exception:
+            # 回滚：还原单元文件、reload、原运行中的服务恢复启动
+            try:
+                sftp_write_atomic(client, fragment, orig_content if orig_content.endswith("\n") else orig_content + "\n")
+                exec_cmd(client, "systemctl daemon-reload 2>/dev/null")
+                if was_active:
+                    systemctl(client, host_id, "start", name, timeout=30)
+            except Exception:
+                pass
+            raise
+        db.log_action(host_id, user, "delete", name,
+                     f"已删除 {fragment}" + ("（含 .bak 备份）" if had_bak else ""),
+                     request.client.host if request.client else "")
+    finally:
+        pool.checkin(client)
+    return ok({"deleted": fragment, "stopped": was_active, "reloaded": True})
 
 
 @router.post("/{name}/{action}")

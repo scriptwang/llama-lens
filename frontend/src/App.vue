@@ -1,12 +1,16 @@
 <template>
-  <TerminalFrame>
-    <!-- :key 按主机 id 强制重建：切换主机时重置 WS 流 / 历史 / 服务管理等全部组件状态 -->
-    <router-view :key="$route.params.id" />
-  </TerminalFrame>
+  <!-- Element Plus 全局中文（日期面板星期/今天/确定、表格空态、对话框按钮等） -->
+  <el-config-provider :locale="zhCn">
+    <TerminalFrame>
+      <!-- :key 按主机 id 强制重建：切换主机时重置 WS 流 / 历史 / 服务管理等全部组件状态 -->
+      <router-view :key="$route.params.id" />
+    </TerminalFrame>
+  </el-config-provider>
 </template>
 
 <script setup>
 import { watch } from 'vue'
+import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import TerminalFrame from './components/TerminalFrame.vue'
 import { totalSpeed } from './speed'
 

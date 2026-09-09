@@ -48,6 +48,7 @@
           @logs="openCtlLogs"
           @duplicate="openCtlDup"
           @rename="onCtlRename"
+          @delete="onCtlDelete"
         />
       </el-col>
     </el-row>
@@ -220,6 +221,27 @@ function openCtlLogs(service) {
 function openCtlDup(service) {
   ctlDupService.value = service
   ctlDupVisible.value = true
+}
+
+// 删除：停止（如运行中）+ 删除单元文件（仅 /etc/systemd/system；后端失败自动回滚）
+async function onCtlDelete(service) {
+  try {
+    await ElMessageBox.confirm(
+      `将停止服务（如运行中）并永久删除单元文件 ${service.fragment_path || service.name}，此操作不可撤销。`,
+      '删除服务',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+  } catch { return } // 取消
+  ctlActionLoading.value[service.name] = 'delete'
+  try {
+    await http.post(`/services/${encodeURIComponent(service.name)}/delete`, null,
+      { params: { host_id: ctlDbId.value } })
+    ElMessage.success(`已删除 ${service.name}`)
+    ctlScan()
+  } catch (e) { /* client 已提示 */ }
+  finally {
+    delete ctlActionLoading.value[service.name]
+  }
 }
 
 // 重命名：单元文件改名（后端运行中会先停后启，失败自动回滚）

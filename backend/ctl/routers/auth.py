@@ -40,11 +40,17 @@ def _login_rate_limited(ip: str, username: str) -> bool:
 def get_current_user(request: Request) -> str:
     if not settings.auth_enabled:
         return "local"
+    # 优先 Authorization 头；回退 ?token= 查询参数（供 <a href> 直链下载等无法带头的场景）
+    token = ""
     auth = request.headers.get("Authorization", "")
-    if not auth.startswith("Bearer "):
+    if auth.startswith("Bearer "):
+        token = auth[7:]
+    else:
+        token = request.query_params.get("token", "")
+    if not token:
         raise ApiError(JWT_INVALID, "未登录或登录已过期")
     try:
-        payload = decode_token(auth[7:])
+        payload = decode_token(token)
         return payload.get("sub", "unknown")
     except Exception:
         raise ApiError(JWT_INVALID, "未登录或登录已过期")

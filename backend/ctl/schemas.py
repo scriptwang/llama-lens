@@ -113,6 +113,7 @@ class ServiceCreateReq(BaseModel):
 
 class ServiceDuplicateReq(BaseModel):
     new_name: str
+    content: Optional[str] = None  # 可选：直接指定新文件内容（前端可编辑）；缺省读取原文件
 
 
 class ServiceRenameReq(BaseModel):

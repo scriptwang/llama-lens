@@ -50,6 +50,7 @@ def _ui_config() -> dict:
             "service": _bool(tabs.get("service"), True),
             "model": _bool(tabs.get("model"), True),
             "playground": _bool(tabs.get("playground"), True),
+            "terminal": _bool(tabs.get("terminal"), True),
         },
         "auto_browse": {
             "enabled": _bool(ab.get("enabled"), False),

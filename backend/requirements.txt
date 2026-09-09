@@ -6,3 +6,4 @@ websockets>=12
 PyYAML>=6.0
 cryptography>=42.0
 PyJWT>=2.8
+python-multipart>=0.0.9
