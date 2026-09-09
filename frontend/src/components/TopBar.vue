@@ -32,6 +32,11 @@
       <button class="diag-btn" title="聚合系统/GPU/服务/API/事件/错误日志，生成诊断报告" @click="diagVisible = true">
         <el-icon style="margin-right:3px"><FirstAidKit /></el-icon>体检
       </button>
+      <button class="power-btn" :disabled="!sshOk"
+              :title="sshOk ? `关机 ${hostName}（费电、非常开，可手动关机）` : 'SSH 断开，无法关机'"
+              @click="poweroff">
+        <el-icon style="margin-right:3px"><SwitchButton /></el-icon>关机
+      </button>
       <ThemeSwitcher />
       <AccountMenu />
       <span v-if="!llamaOnline" class="badge danger">llama 离线</span>
@@ -62,6 +67,10 @@ import ThemeSwitcher from './ThemeSwitcher.vue'
 import AccountMenu from './AccountMenu.vue'
 import DiagnosticDialog from './DiagnosticDialog.vue'
 import { ref } from 'vue'
+import { ElMessage } from 'element-plus/es/components/message/index.mjs'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs'
+import http from '../api/client'
+import { api } from '../api'
 
 const props = defineProps({
   hostId: { type: String, default: '' },
@@ -163,6 +172,37 @@ const modeDotClass = computed(() => {
 function onModeChange(e) {
   emit('update:mode', e.target.value)
 }
+
+async function poweroff() {
+  if (!props.hostId) return
+  let dbId = null
+  try {
+    const hosts = await api.hosts()
+    const h = (hosts || []).find((x) => x.id === props.hostId)
+    dbId = h && h.db_id ? h.db_id : null
+  } catch { /* ignore */ }
+  if (!dbId) { ElMessage.error('无法解析主机 ID，无法关机'); return }
+  const name = props.hostName || props.hostId
+  try {
+    await ElMessageBox.prompt(
+      `将【关机】主机「${name}」。关机后 SSH 立即断开，需手动或带外（IPMI/WOL）重新开机。请输入主机名「${name}」以确认：`,
+      '关机确认',
+      {
+        type: 'warning',
+        confirmButtonText: '确认关机',
+        cancelButtonText: '取消',
+        inputPlaceholder: `输入 ${name} 以确认`,
+        inputValidator: (v) => (v === name ? true : '主机名不匹配，无法关机'),
+      }
+    )
+  } catch { return }
+  try {
+    await http.post(`/hosts/${dbId}/poweroff`)
+    ElMessage.success(`已发送关机指令，${name} 即将下线`)
+  } catch {
+    ElMessage.warning('关机指令已发送（主机正在下线，连接中断属正常现象）')
+  }
+}
 </script>
 
 <style scoped>
@@ -185,6 +225,30 @@ function onModeChange(e) {
   color: var(--cyan);
   border-color: rgba(0, 229, 255, 0.5);
   background: rgba(0, 229, 255, 0.08);
+}
+.power-btn {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  white-space: nowrap;
+  background: transparent;
+  border: 1px solid var(--card-border);
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.power-btn:hover:not(:disabled) {
+  color: var(--red);
+  border-color: rgba(255, 77, 79, 0.5);
+  background: rgba(255, 77, 79, 0.08);
+}
+.power-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 .topbar {
   height: 56px;

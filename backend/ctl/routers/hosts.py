@@ -13,7 +13,8 @@ from .auth import get_current_user
 from ...notify import CHANNELS as NOTIFY_CHANNELS
 from ..schemas import HostConnectReq, HostUpdateReq
 from ..security import decrypt_secret, encrypt_secret
-from ..ssh_pool import pool, run
+from ..ssh_pool import pool, run, exec_cmd
+from ..core.systemctl import cmd_prefix
 
 router = APIRouter(prefix="/api/hosts", tags=["hosts"])
 
@@ -341,3 +342,25 @@ async def delete_host(host_id: int, request: Request, user: str = Depends(get_cu
     )
     db.execute("DELETE FROM hosts WHERE id = ?", (host_id,))
     return ok({"deleted": host_id})
+
+
+@router.post("/{host_id}/poweroff")
+def poweroff(host_id: int, request: Request, user: str = Depends(get_current_user)):
+    """关机：分离执行 systemctl poweroff（后台延迟 1s 再执行，让 SSH 命令先干净返回，避免被关机打断）。
+    关机后 SSH 立即断开，需手动或带外（IPMI/WOL）重新开机。"""
+    row = get_host_row(host_id)
+    client = pool.create_client(host_to_conn_dict(row))
+    try:
+        prefix = cmd_prefix(client, host_id)
+        exec_cmd(client, f"{prefix}nohup sh -c 'sleep 1; systemctl poweroff' >/dev/null 2>&1 &")
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
+    db.log_action(
+        host_id, user, "poweroff", "",
+        json.dumps({"host": row["host"]}, ensure_ascii=False),
+        request.client.host if request.client else "",
+    )
+    return ok({"powered_off": True, "host": row["host"]})
