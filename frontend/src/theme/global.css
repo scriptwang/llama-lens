@@ -14,6 +14,16 @@
   --grid-line: rgba(0, 229, 255, 0.04);
   --chart-grid: rgba(143, 163, 200, 0.12);
   --chrome-top: 0px; /* 终端主题窗口标题栏高度，其余主题无 */
+  /* 原生下拉箭头（明暗主题通用中性色） */
+  --select-arrow: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%239aa5ce' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  /* 凹陷/嵌套区背景：明暗主题各自适配，避免硬编码深色底在浅色下露黑块 */
+  --inset-bg: rgba(0, 0, 0, 0.3);
+  --inset-bg-strong: rgba(0, 0, 0, 0.45);
+  --card-inset: rgba(0, 0, 0, 0.18);
+  --chip-inset: rgba(0, 0, 0, 0.2);
+  --track-bg: rgba(0, 0, 0, 0.3);
+  --card-inset-grad: linear-gradient(155deg, rgba(0, 229, 255, 0.06) 0%, rgba(0, 0, 0, 0.22) 55%);
+  --host-card-grad: linear-gradient(160deg, rgba(0, 229, 255, 0.04) 0%, rgba(0, 0, 0, 0.18) 60%);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -21,6 +31,24 @@ html, body { height: 100%; }
 /* 原生控件（select 下拉列表/滚动条等）跟随主题明暗，避免深色主题下露出白底 */
 html.dark { color-scheme: dark; }
 html:not(.dark) { color-scheme: light; }
+
+/* 下拉框可见性：不依赖浏览器 color-scheme 默认渲染（部分浏览器/主题下选项列表看不清），
+   统一自定义箭头 + 选项显式主题色 */
+select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: var(--select-arrow);
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 10px 6px;
+  padding-right: 26px;
+  cursor: pointer;
+}
+select option {
+  background-color: var(--bg-grad);
+  color: var(--text);
+}
+select:focus { outline: none; }
 
 body {
   background:

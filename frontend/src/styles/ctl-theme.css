@@ -396,3 +396,37 @@
 .ctl-scope .scan-box { height: 240px; }
 @media (max-width: 900px) {.ctl-scope .topbar { flex-wrap: wrap; height: auto; padding: 10px 14px; }
 }
+
+/* Element Plus 弹层（select 下拉等）：实底 + 边框 + 阴影，暗色主题下不透明不刺眼 */
+.el-popper.is-light {
+  --el-bg-color-overlay: var(--lc-surface-solid);
+  background: var(--lc-surface-solid);
+  border: 1px solid var(--lc-border-strong);
+  box-shadow: var(--lc-shadow-hover);
+}
+.el-select-dropdown__item {
+  color: var(--lc-text-secondary);
+  font-size: 13px;
+}
+.el-select-dropdown__item.is-hovering {
+  background: color-mix(in srgb, var(--lc-primary) 10%, transparent);
+  color: var(--lc-text);
+}
+.el-select-dropdown__item.is-selected {
+  color: var(--lc-primary);
+  font-weight: 600;
+}
+/* el-select 触发框：与原生 select 一致的可见度 */
+.el-select .el-input__wrapper {
+  background-color: var(--lc-ctrl-bg);
+  box-shadow: 0 0 0 1px var(--lc-border) inset;
+}
+.el-select .el-input__wrapper.is-focus {
+  box-shadow: 0 0 0 1px var(--lc-primary) inset;
+}
+.el-select .el-input__inner {
+  color: var(--lc-text);
+}
+.el-select .el-input__suffix {
+  color: var(--lc-text-muted);
+}

@@ -19,6 +19,13 @@ html[data-theme='light'] {
   --text-faint: #8c959f;
   --grid-line: rgba(9, 105, 218, 0.05);
   --chart-grid: rgba(87, 96, 106, 0.16);
+  --inset-bg: #f6f8fa;
+  --inset-bg-strong: #eef1f5;
+  --card-inset: #f6f8fa;
+  --chip-inset: #eef1f5;
+  --track-bg: rgba(87, 96, 106, 0.16);
+  --card-inset-grad: linear-gradient(155deg, rgba(9, 105, 218, 0.05) 0%, #f6f8fa 60%);
+  --host-card-grad: linear-gradient(160deg, rgba(9, 105, 218, 0.04) 0%, #f6f8fa 60%);
 }
 
 /* 浅色：去玻璃拟态，实底卡片 + 柔和投影 */
@@ -80,3 +87,13 @@ html[data-theme='light'] .feed-box { background: #f6f8fa; }
 html[data-theme='light'] .cmdline { background: #f6f8fa; }
 html[data-theme='light'] .stat3 .stat { background: rgba(87, 96, 106, 0.06); }
 html[data-theme='light'] .legend .sw.free { background: rgba(87, 96, 106, 0.2); }
+
+/* 终端：xterm 内容配色由 JS 随主题切换（浅色=浅底深字）；此处适配终端外壳/空态/粘贴框 */
+html[data-theme='light'] .term-host-wrap { background: #f6f8fa; }
+html[data-theme='light'] .term-overlay { background: rgba(246, 248, 250, 0.92); color: #57606a; }
+html[data-theme='light'] .term-paste-box { background: #ffffff; border-color: #d0d7de; }
+html[data-theme='light'] .term-paste-box textarea { background: #f6f8fa; color: #24292f; border-color: #d0d7de; }
+html[data-theme='light'] .term-empty { background: #f6f8fa; color: #57606a; }
+/* 终端分屏面板头 */
+html[data-theme='light'] .sp-pane-head { background: #eef1f5; }
+html[data-theme='light'] .sp-pane.on .sp-pane-head { background: color-mix(in srgb, var(--cyan) 10%, #ffffff); }

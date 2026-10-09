@@ -23,6 +23,24 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { ClipboardAddon } from '@xterm/addon-clipboard'
 import '@xterm/xterm/css/xterm.css'
+import { themeState, isDarkTheme } from '../theme'
+
+// xterm 配色随明暗主题切换（浅色主题下终端不再是黑块，与整体浅色一致）
+const XTERM_DARK = {
+  background: '#161822',
+  foreground: '#d8dce8',
+  cursor: '#7aa2f7',
+  selectionBackground: '#3d4466',
+}
+const XTERM_LIGHT = {
+  background: '#f6f8fa',
+  foreground: '#24292f',
+  cursor: '#0969da',
+  selectionBackground: 'rgba(9, 105, 218, 0.22)',
+}
+function xtermTheme() {
+  return isDarkTheme(themeState.id) ? XTERM_DARK : XTERM_LIGHT
+}
 
 // 单个终端会话：独立 xterm + 独立 WS（后端每个连接开独立 SSH shell，互不干扰）
 const props = defineProps({
@@ -57,12 +75,7 @@ function initTerm() {
     cursorBlink: true,
     fontSize: 14,
     fontFamily: 'ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace',
-    theme: {
-      background: '#161822',
-      foreground: '#d8dce8',
-      cursor: '#7aa2f7',
-      selectionBackground: '#3d4466',
-    },
+    theme: xtermTheme(),
     scrollback: 5000,
     allowProposedApi: true,
   })
@@ -236,6 +249,10 @@ onMounted(() => {
 })
 watch(() => props.dbId, (v) => {
   if (v && (status.value === 'idle' || status.value === 'error' || status.value === 'closed')) connect()
+})
+// 主题切换时实时更新 xterm 配色（无需重建终端）
+watch(() => themeState.version, () => {
+  if (term) term.options.theme = xtermTheme()
 })
 watch(() => props.active, (a) => {
   if (a) {
