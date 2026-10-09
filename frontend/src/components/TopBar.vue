@@ -1,6 +1,6 @@
 <template>
   <header class="topbar">
-    <router-link to="/" class="back">← 门户</router-link>
+    <router-link to="/" class="back">← 主机</router-link>
     <div class="host-info">
       <span class="dot" :class="dotClass"></span>
       <span class="hostname" :title="hostName">{{ hostName }}</span>
@@ -12,7 +12,7 @@
         <span class="k">速度</span><span class="v mono">{{ genText }}</span>
       </span>
       <span class="stat" :class="mtpLevel" :title="mtpTip">
-        <span class="k">MTP</span><span class="v mono">{{ mtpText }}</span>
+        <span class="k">{{ isSglang ? 'Spec' : 'MTP' }}</span><span class="v mono">{{ mtpText }}</span>
       </span>
       <span class="stat" :class="ctxLevel" :title="ctxTip">
         <span class="k">上下文</span><span class="v mono">{{ ctxText }}</span>
@@ -39,7 +39,7 @@
       </button>
       <ThemeSwitcher />
       <AccountMenu />
-      <span v-if="!llamaOnline" class="badge danger">llama 离线</span>
+      <span v-if="!llamaOnline" class="badge danger">{{ isSglang ? 'SGLang 离线' : 'llama 离线' }}</span>
       <span v-else-if="!sshOk" class="badge warn">SSH 断开</span>
       <span v-else class="badge ok">在线</span>
       <LiveClock />
@@ -78,6 +78,7 @@ const props = defineProps({
   modelName: { type: String, default: '' },
   modelTitle: { type: String, default: '' },
   llamaOnline: { type: Boolean, default: false },
+  engineType: { type: String, default: 'llama_cpp' },
   sshOk: { type: Boolean, default: false },
   stats: { type: Object, default: null },
   mode: { type: String, default: 'ws' },
@@ -89,6 +90,7 @@ const emit = defineEmits(['update:mode'])
 const diagVisible = ref(false)
 
 const st = computed(() => props.stats || {})
+const isSglang = computed(() => props.engineType === 'sglang')
 const alerts = computed(() => st.value.alerts || [])
 const num = (v) => (v === null || v === undefined || Number.isNaN(v) ? null : v)
 
@@ -102,17 +104,26 @@ const genText = computed(() => {
 })
 const genTip = computed(() => {
   const s = st.value
-  if (!s.online) return 'llama offline'
+  if (!s.online) return isSglang.value ? 'SGLang 离线' : 'llama 离线'
   return `gen ${num(s.gen) || 0} t/s · prompt ${num(s.prompt) || 0} t/s · 来源 ${s.speedSource || '—'}`
 })
 const genLevel = computed(() => (st.value.online ? 'normal' : 'off'))
 
 const mtpText = computed(() => {
+  if (isSglang.value) {
+    const v = num(st.value.spec)
+    return v === null ? '—' : v.toFixed(2)
+  }
   const v = num(st.value.mtp)
   return v === null ? '—' : `${v.toFixed(1)}%`
 })
-const mtpTip = computed(() => (num(st.value.mtp) === null ? '等待任务结束' : 'MTP draft 接受率'))
-const mtpLevel = computed(() => (num(st.value.mtp) === null ? 'off' : alertLevel(alerts.value, 'mtp')))
+const mtpTip = computed(() => (isSglang.value ? '投机接受长度 (tok/step)' : (num(st.value.mtp) === null ? '等待任务结束' : 'MTP draft 接受率')))
+const mtpLevel = computed(() => {
+  if (isSglang.value) {
+    return num(st.value.spec) === null ? 'off' : 'normal'
+  }
+  return (num(st.value.mtp) === null ? 'off' : alertLevel(alerts.value, 'mtp'))
+})
 
 const ctxText = computed(() => {
   const s = st.value

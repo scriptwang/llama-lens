@@ -60,6 +60,7 @@ DEFAULT_THRESHOLDS: Dict[str, Dict[str, float]] = {
     "disk": {"warn": 80, "danger": 90},
     "ctx": {"warn": 80, "danger": 90},
     "mtp": {"warn": 80, "danger": 65},
+    "queue": {"warn": 8, "danger": 16},
 }
 
 # 低于阈值才告警的指标（其余为高于阈值告警）
@@ -87,6 +88,23 @@ class LlamaCfg:
     interval: float = 1.0        # /health + /slots 轮询间隔（秒）
     slow_interval: float = 30.0  # /props + /v1/models 轮询间隔（秒）
     timeout: float = 3.0         # 单次请求超时
+
+
+@dataclass
+class EngineCfg:
+    """统一引擎配置（Engine 适配层入口）。
+
+    type: llama_cpp | sglang；host 缺省回退 llama.host。
+    llama_cpp 时 LlamaPoller 仍读 cfg.llama（保持旧行为），此处字段仅用于
+    sglang 等引擎的 HTTP 地址与认证。
+    """
+    type: str = "llama_cpp"
+    host: str = ""
+    port: int = 0
+    interval: float = 1.0        # 主采集周期（llama: /health+/slots；sglang: /v1/loads）
+    slow_interval: float = 30.0  # 慢轮询（llama: /props+/v1/models；sglang: server/model 信息）
+    timeout: float = 3.0         # 单次请求超时
+    api_key: Optional[str] = None
 
 
 @dataclass
@@ -118,7 +136,9 @@ class HostConfig:
     name: str
     llama: LlamaCfg
     ssh: SshCfg
+    engine: EngineCfg = field(default_factory=EngineCfg)
     process_name: str = "llama-server"
+    process_cmdline: str = ""    # cmdline 固定串进程识别（comm 名对不上的引擎，如 sglang）
     log: LogCfg = field(default_factory=LogCfg)
     disk_mounts: List[str] = field(default_factory=lambda: ["/"])
     systemd_unit: str = "llama-server.service"
@@ -147,10 +167,26 @@ class GlobalConfig:
 
 
 @dataclass
+class GatewayConfig:
+    """统一网关配置（详见 docs/07）。"""
+    enabled: bool = True
+    default_host: str = ""
+    affinity: bool = True
+    same_model_lb: bool = False
+    cross_model_fallback: bool = False
+    fallback_rules: list = field(default_factory=list)
+    model_prices: Dict[str, float] = field(default_factory=dict)
+    audit_retention_days: int = 30
+    trace_retention_days: int = 7
+    db_path: str = "data/gateway.db"
+
+
+@dataclass
 class AppConfig:
     global_cfg: GlobalConfig
     hosts: List[HostConfig]
     port: int = 8000
+    gateway: GatewayConfig = field(default_factory=GatewayConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +201,24 @@ def _build_llama(d: dict) -> LlamaCfg:
         interval=float(d.get("interval", 1.0)),
         slow_interval=float(d.get("slow_interval", 30.0)),
         timeout=float(d.get("timeout", 3.0)),
+    )
+
+
+def _build_engine(d: dict, llama_d: Optional[dict]) -> EngineCfg:
+    d = d or {}
+    llama_d = llama_d or {}
+    etype = str(d.get("type", "")).strip().lower() or "llama_cpp"
+    if etype not in ("llama_cpp", "sglang"):
+        raise ValueError("engine.type 仅支持 llama_cpp | sglang，当前: %s" % etype)
+    host = d.get("host") or llama_d.get("host", "")
+    return EngineCfg(
+        type=etype,
+        host=host,
+        port=int(d.get("port") or (30000 if etype == "sglang" else 8080)),
+        interval=float(d.get("interval", 1.0)),
+        slow_interval=float(d.get("slow_interval", 30.0)),
+        timeout=float(d.get("timeout", 3.0)),
+        api_key=resolve_env(d.get("api_key")) or None,
     )
 
 
@@ -209,12 +263,20 @@ def _build_host(d: dict, global_t: dict) -> HostConfig:
         process_name = proc.get("name", "llama-server")
     else:
         process_name = d.get("process_name", "llama-server")
+    engine = _build_engine(d.get("engine"), d.get("llama"))
+    process_cmdline = d.get("process_cmdline", "") or ""
+    if not process_cmdline and engine.type == "sglang":
+        # sglang 主进程 comm 名不固定（python3/sglang），默认按 cmdline 固定串识别
+        process_cmdline = "sglang serve"
+    process_cmdline = re.sub(r"[^\w .:/+-]", "", process_cmdline).strip()
     return HostConfig(
         id=str(host_id),
         name=d.get("name", host_id),
         llama=_build_llama(d.get("llama")),
         ssh=_build_ssh(d.get("ssh")),
+        engine=engine,
         process_name=process_name,
+        process_cmdline=process_cmdline,
         log=_build_log(d.get("log")),
         disk_mounts=[str(x) for x in (d.get("disk_mounts") or ["/"])],
         systemd_unit=d.get("systemd_unit") or "llama-server.service",
@@ -300,5 +362,20 @@ def load_config(base_dir: str, env_file: Optional[str] = None,
             h.ssh.key_path = os.path.expanduser(h.ssh.key_path)
 
     port = resolve_port(base_dir)
-    return AppConfig(global_cfg=global_cfg, hosts=hosts, port=port)
+
+    gw_raw = raw.get("gateway") or {}
+    gw_strategy = gw_raw.get("strategy") or {}
+    gateway_cfg = GatewayConfig(
+        enabled=bool(gw_raw.get("enabled", True)),
+        default_host=str(gw_raw.get("default_host", "")),
+        affinity=bool(gw_strategy.get("affinity", True)),
+        same_model_lb=bool(gw_strategy.get("same_model_lb", False)),
+        cross_model_fallback=bool(gw_strategy.get("cross_model_fallback", False)),
+        fallback_rules=gw_raw.get("fallback_rules") or [],
+        model_prices=gw_raw.get("model_prices") or {},
+        audit_retention_days=int(gw_raw.get("audit_retention_days", 30)),
+        trace_retention_days=int(gw_raw.get("trace_retention_days", 7)),
+        db_path=str(gw_raw.get("db_path", "data/gateway.db")),
+    )
+    return AppConfig(global_cfg=global_cfg, hosts=hosts, port=port, gateway=gateway_cfg)
 

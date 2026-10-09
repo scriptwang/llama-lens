@@ -2,11 +2,13 @@ import { createRouter, createWebHistory } from 'vue-router'
 import PortalView from './views/PortalView.vue'
 import HostDetailView from './views/HostDetailView.vue'
 import LoginView from './views/LoginView.vue'
+import ClusterView from './views/ClusterView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', name: 'portal', component: PortalView },
+    { path: '/cluster', name: 'cluster', component: ClusterView },
     { path: '/host/:id', name: 'host', component: HostDetailView, props: true },
     { path: '/login', name: 'login', component: LoginView }
   ]

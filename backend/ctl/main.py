@@ -56,7 +56,7 @@ async def lifespan(app: FastAPI):
     shutdown_ctl()
 
 
-app = FastAPI(title="LlamaLens Ctl API", version="1.1", lifespan=lifespan)
+app = FastAPI(title="LLMLens Ctl API", version="1.1", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,

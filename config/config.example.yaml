@@ -30,3 +30,24 @@ global:
   thresholds:               # 全局阈值覆盖（可选，默认见 backend/config.py）
     gpu_util: {warn: 80, danger: 95}
     ctx: {warn: 80, danger: 90}
+    queue: {warn: 8, danger: 16}   # SGLang 排队请求数（waiting），仅 sglang 主机生效
+ui:
+  tabs:                        # 顶部 TAB 页显隐（功能开关，false = 隐藏）
+    monitor: true              # 监控
+    service: true              # 服务
+    terminal: true             # 终端
+    model: true                # 模型
+    playground: true           # 试玩
+    gateway: true              # 网关（主机详情里的网关 Tab）
+
+gateway:
+  enabled: true
+  default_host: ai.lan
+  strategy:
+    affinity: true                # 档1 模型亲和（默认开）
+    same_model_lb: false          # 档2 同模型 LB（默认关）
+    cross_model_fallback: false   # 档3 跨模型降级（默认关）
+  model_prices: {}                # token 单价口径（可选）{model: price_per_1k}
+  audit_retention_days: 30
+  trace_retention_days: 7
+  db_path: data/gateway.db

@@ -28,6 +28,7 @@ from .ctl.main import ctl_routers, init_ctl, shutdown_ctl
 from .history import HistoryStore, HistoryWriter
 from .monitor import MonitorRegistry
 from .ws import router as ws_router
+from .gateway import data_router as gateway_data_router, admin_router as gateway_admin_router
 
 log = logging.getLogger("llamalens.main")
 
@@ -145,31 +146,83 @@ def create_app(base_dir: Optional[str] = None) -> FastAPI:
         app.state.registry = registry
         app.state.history = history_store
 
+        # 统一网关（透明入口 + 模型亲和路由 + 治理观测，详见 docs/07）
+        gateway_state = None
+        if app_cfg.gateway.enabled:
+            from .gateway.store import GatewayStore, GatewayWriter
+            gw_db = app_cfg.gateway.db_path
+            if not os.path.isabs(gw_db):
+                gw_db = os.path.join(base_dir, gw_db)
+            try:
+                gw_store = GatewayStore(gw_db)
+                gw_writer = GatewayWriter(gw_store, flush_interval=2.0,
+                                          audit_days=app_cfg.gateway.audit_retention_days,
+                                          trace_days=app_cfg.gateway.trace_retention_days)
+                from .ctl import database as ctl_db
+                excluded = {r["mid"] for r in
+                            ctl_db.query("SELECT mid FROM hosts WHERE gateway_excluded = 1 AND mid != ''")}
+                # 路由策略：config.yaml 为底，gateway.db 里的动态开关优先（重启保留）
+                strategy = {
+                    "affinity": app_cfg.gateway.affinity,
+                    "same_model_lb": app_cfg.gateway.same_model_lb,
+                    "cross_model_fallback": app_cfg.gateway.cross_model_fallback,
+                    "fallback_rules": app_cfg.gateway.fallback_rules,
+                }
+                db_strategy = gw_store.get_kv("strategy")
+                if isinstance(db_strategy, dict):
+                    strategy.update(db_strategy)
+                # 模型单价：config.yaml 为底，gateway.db 里的 UI 配置优先（重启保留）
+                model_prices = dict(app_cfg.gateway.model_prices or {})
+                db_prices = gw_store.get_kv("model_prices")
+                if isinstance(db_prices, dict):
+                    model_prices = db_prices
+                gateway_state = {
+                    "enabled": True,
+                    "store": gw_store,
+                    "writer": gw_writer,
+                    "registry": registry,
+                    "default_host": app_cfg.gateway.default_host,
+                    "excluded": excluded,
+                    "strategy": strategy,
+                    "model_prices": model_prices,
+                }
+                log.info("统一网关已启用: %s (default_host=%s)",
+                         gw_db, app_cfg.gateway.default_host or "(无)")
+            except Exception:
+                log.exception("网关初始化失败，网关功能不可用")
+        app.state.gateway = gateway_state
+
         # 启动时从历史 DB 回填环形缓冲：容器重启后内存缓冲为空，短窗口（≤1h）
         # 否则只能看到重启后的数据。回填最近 1h，消除缺口（一次性、启动前完成）。
         if history_store is not None:
             for m in registry.monitors.values():
                 m.backfill_from_store(history_store)
 
-        log.info("llama灵境 启动：端口 %d，主机 %s", app_cfg.port,
+        log.info("LLMLens 启动：端口 %d，主机 %s", app_cfg.port,
                  [h.id for h in app_cfg.hosts] or "(无)")
         await registry.start()
         try:
             yield
         finally:
             await registry.stop()
+            if gateway_state is not None:
+                gateway_state["writer"].close()
+                gateway_state["store"].close()
+                log.info("统一网关已停止")
             if history_writer is not None:
                 history_writer.close()
             if history_store is not None:
                 history_store.close()
             shutdown_ctl()
-            log.info("llama灵境 已停止")
+            log.info("LLMLens 已停止")
 
-    app = FastAPI(title="llama灵境", lifespan=lifespan)
+    app = FastAPI(title="LLMLens", lifespan=lifespan)
     app.include_router(api_router)
     app.include_router(efficiency_router)
     app.include_router(playground_router)
     app.include_router(ws_router)
+    app.include_router(gateway_data_router)
+    app.include_router(gateway_admin_router)
     for r in ctl_routers:
         app.include_router(r)
     app.add_exception_handler(ApiError, api_error_handler)

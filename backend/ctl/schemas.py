@@ -39,6 +39,15 @@ class HostConnectReq(BaseModel):
     log_catchup_sec: int = 30
     disk_mounts: Optional[list] = None
     thresholds: Optional[dict] = None
+    # 推理引擎配置（默认 llama_cpp；sglang 需 host/port，api_key 可选）
+    engine_type: str = "llama_cpp"
+    engine_host: Optional[str] = None
+    engine_port: Optional[int] = None
+    engine_interval: float = 1.0
+    engine_slow_interval: float = 30.0
+    engine_timeout: float = 3.0
+    engine_api_key: Optional[str] = None
+    process_cmdline: Optional[str] = None
     # 告警推送
     notify_enabled: bool = False
     notify_type: str = "wecom"
@@ -75,6 +84,15 @@ class HostUpdateReq(BaseModel):
     log_follow: Optional[bool] = None
     log_catchup_sec: Optional[int] = None
     # 告警推送（None = 不修改）
+    # 推理引擎配置（None = 不修改）
+    engine_type: Optional[str] = None
+    engine_host: Optional[str] = None
+    engine_port: Optional[int] = None
+    engine_interval: Optional[float] = None
+    engine_slow_interval: Optional[float] = None
+    engine_timeout: Optional[float] = None
+    engine_api_key: Optional[str] = None
+    process_cmdline: Optional[str] = None
     notify_enabled: Optional[bool] = None
     notify_type: Optional[str] = None
     notify_url: Optional[str] = None

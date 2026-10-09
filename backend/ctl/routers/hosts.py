@@ -1,8 +1,11 @@
 import json
 import re
 import stat
+import time
 from datetime import datetime, timezone
 from fnmatch import fnmatch
+
+import httpx
 
 from fastapi import APIRouter, Depends, Request
 
@@ -15,6 +18,7 @@ from ..schemas import HostConnectReq, HostUpdateReq
 from ..security import decrypt_secret, encrypt_secret
 from ..ssh_pool import pool, run, exec_cmd
 from ..core.systemctl import cmd_prefix
+from ...engine.sglang import _base_url
 
 router = APIRouter(prefix="/api/hosts", tags=["hosts"])
 
@@ -27,6 +31,19 @@ SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")      # 进程名
 UNIT_REF_RE = re.compile(r"^[A-Za-z0-9._@-]+$")      # unit 名（可不含 .service 后缀）
 SAFE_PATH_RE = re.compile(r"^/[A-Za-z0-9._/-]+$")    # 日志文件绝对路径
 SAFE_MOUNT_RE = re.compile(r"^/[A-Za-z0-9._-]*$")    # 挂载点
+SAFE_CMDLINE_RE = re.compile(r"^[\w .:/+-]*$")   # 进程匹配串
+
+
+ENGINE_TYPES = ("llama_cpp", "sglang")
+
+
+def validate_engine_fields(engine_type, process_cmdline) -> None:
+    """校验引擎字段。process_cmdline 会拼进远端 shell 命令，必须白名单限制。"""
+    if engine_type not in ENGINE_TYPES:
+        raise ApiError(VALIDATION_FAILED, "engine_type 必须是 %s 之一" % "/".join(ENGINE_TYPES))
+    cmd = (process_cmdline or "").strip()
+    if len(cmd) > 128 or not SAFE_CMDLINE_RE.match(cmd):
+        raise ApiError(VALIDATION_FAILED, "进程匹配串仅允许字母数字及 . _ : / + - 空格，长度 ≤ 128")
 
 
 def validate_monitor_fields(systemd_unit, process_name, log_source, log_unit,
@@ -65,6 +82,12 @@ def _public(row) -> dict:
         "notify_enabled": bool(row["notify_enabled"]),
         "notify_type": row["notify_type"] or "wecom",
         "notify_url": row["notify_url"] or "",
+        "gateway_excluded": bool(row["gateway_excluded"]),
+        "engine_type": row["engine_type"] or "llama_cpp",
+        "engine_host": row["engine_host"] or "",
+        "engine_port": row["engine_port"] or 0,
+        "process_cmdline": row["process_cmdline"] or "",
+        "has_engine_api_key": bool(row["engine_api_key_enc"]),
         "created_at": row["created_at"],
         "last_connected_at": row["last_connected_at"],
     }
@@ -106,6 +129,7 @@ def connect(req: HostConnectReq, request: Request, user: str = Depends(get_curre
         raise ApiError(VALIDATION_FAILED, "私钥内容不能为空")
     validate_monitor_fields(req.systemd_unit, req.process_name, req.log_source,
                             req.log_unit, req.log_path, req.disk_mounts)
+    validate_engine_fields(req.engine_type, req.process_cmdline)
     unit = req.systemd_unit or "llama-server.service"
 
     test_row = {
@@ -141,8 +165,12 @@ def connect(req: HostConnectReq, request: Request, user: str = Depends(get_curre
         1 if req.log_follow else 0, req.log_catchup_sec,
         json.dumps(req.disk_mounts) if req.disk_mounts else '["/"]',
         json.dumps(req.thresholds) if req.thresholds else None,
-        1 if req.notify_enabled else 0, req.notify_type or "wecom", req.notify_url or "",
+        req.engine_type or "llama_cpp", req.engine_host or "", req.engine_port or 0,
+        req.engine_interval, req.engine_slow_interval, req.engine_timeout,
+        (req.process_cmdline or "").strip(),
     )
+    eng_key_enc = encrypt_secret(req.engine_api_key) if req.engine_api_key else None
+    notify_vals = (1 if req.notify_enabled else 0, req.notify_type or "wecom", req.notify_url or "")
     if existing:
         db.execute(
             """UPDATE hosts SET alias = ?, encrypted_pwd = ?, auth_type = ?, key_passphrase_enc = ?,
@@ -152,9 +180,12 @@ def connect(req: HostConnectReq, request: Request, user: str = Depends(get_curre
                ssh_timeout = ?, key_path = ?, process_name = ?, systemd_unit = ?,
                log_source = ?, log_unit = ?, log_path = ?, log_follow = ?, log_catchup_sec = ?,
                disk_mounts = ?, thresholds = ?,
+               engine_type = ?, engine_host = ?, engine_port = ?, engine_interval = ?,
+               engine_slow_interval = ?, engine_timeout = ?, process_cmdline = ?,
+               engine_api_key_enc = ?,
                notify_enabled = ?, notify_type = ?, notify_url = ? WHERE id = ?""",
             (req.alias, enc, req.auth_type, enc_pass, req.browse_paths or "", _now(),
-             *mon_vals, existing["id"]),
+             *mon_vals, eng_key_enc, *notify_vals, existing["id"]),
         )
         host_id = existing["id"]
         action = "restart"
@@ -168,10 +199,13 @@ def connect(req: HostConnectReq, request: Request, user: str = Depends(get_curre
                llama_slow_interval, llama_timeout, ssh_interval, ssh_keepalive,
                ssh_timeout, key_path, process_name, systemd_unit,
                log_source, log_unit, log_path, log_follow, log_catchup_sec,
-               disk_mounts, thresholds, notify_enabled, notify_type, notify_url)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               disk_mounts, thresholds,
+               engine_type, engine_host, engine_port, engine_interval,
+               engine_slow_interval, engine_timeout, process_cmdline, engine_api_key_enc,
+               notify_enabled, notify_type, notify_url)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (mid, req.alias, req.host, req.port, req.username, enc, req.auth_type,
-             enc_pass, req.browse_paths or "", _now(), *mon_vals),
+             enc_pass, req.browse_paths or "", _now(), *mon_vals, eng_key_enc, *notify_vals),
         )
         host_id = cur.lastrowid
         action = "start"
@@ -265,6 +299,10 @@ async def update_host(host_id: int, req: HostUpdateReq, request: Request, user: 
         req.log_path if req.log_path is not None else row0["log_path"],
         req.disk_mounts if req.disk_mounts is not None else json.loads(row0["disk_mounts"] or "[]"),
     )
+    validate_engine_fields(
+        req.engine_type if req.engine_type is not None else row0["engine_type"],
+        req.process_cmdline if req.process_cmdline is not None else row0["process_cmdline"],
+    )
     if req.systemd_unit == "":
         req.systemd_unit = "llama-server.service"
     fields, params = [], []
@@ -292,6 +330,9 @@ async def update_host(host_id: int, req: HostUpdateReq, request: Request, user: 
             fields.append("key_passphrase_enc = ?"); params.append(encrypt_secret(req.key_passphrase)); conn_changed = True
     elif req.password:
         fields.append("encrypted_pwd = ?"); params.append(encrypt_secret(req.password)); conn_changed = True
+    if req.engine_api_key:
+        fields.append("engine_api_key_enc = ?"); params.append(encrypt_secret(req.engine_api_key))
+        mon_changed = True
     mon_changed = False
     for f in MONITOR_FIELDS:
         v = getattr(req, f)
@@ -328,6 +369,67 @@ def test_host(host_id: int, request: Request, user: str = Depends(get_current_us
     db.execute("UPDATE hosts SET last_connected_at = ? WHERE id = ?", (_now(), host_id))
     db.log_action(host_id, user, "connect", "", "测试连接", request.client.host if request.client else "")
     return ok({"ok": True})
+
+
+@router.post("/{host_id}/connectivity-test")
+def connectivity_test(host_id: int, request: Request, user: str = Depends(get_current_user)):
+    """连通性测试：SSH（id -u）+ 引擎 API（sglang 用 /v1/loads、llama 用 /health），分别计时。"""
+    row = get_host_row(host_id)
+
+    ssh = {"ok": False}
+    t0 = time.time()
+    try:
+        client = pool.create_client(host_to_conn_dict(row))
+        try:
+            run(client, "id -u", timeout=10)
+            ssh["ok"] = True
+        finally:
+            client.close()
+        ssh["latency_ms"] = int((time.time() - t0) * 1000)
+    except ApiError as e:
+        ssh["latency_ms"] = int((time.time() - t0) * 1000)
+        ssh["detail"] = e.msg
+    except Exception as e:
+        ssh["latency_ms"] = int((time.time() - t0) * 1000)
+        ssh["detail"] = type(e).__name__
+
+    etype = row["engine_type"] or "llama_cpp"
+    is_sglang = etype == "sglang"
+    ehost = row["engine_host"] or row["llama_host"] or row["host"]
+    eport = int(row["engine_port"] or 0) or (30000 if is_sglang else int(row["llama_port"] or 8080))
+    ekey = decrypt_secret(row["engine_api_key_enc"]) if row["engine_api_key_enc"] else None
+    eng = {"ok": False}
+    t0 = time.time()
+    try:
+        with httpx.Client(
+            base_url=_base_url(ehost, eport),
+            headers={"Authorization": f"Bearer {ekey}"} if ekey else {},
+            timeout=8.0,
+        ) as c:
+            r = c.get("/v1/loads" if is_sglang else "/health")
+        eng["latency_ms"] = int((time.time() - t0) * 1000)
+        if r.status_code == 200:
+            eng["ok"] = True
+            if is_sglang:
+                try:
+                    ver = (r.json() or {}).get("version")
+                    if ver:
+                        eng["detail"] = "version %s" % ver
+                except Exception:
+                    pass
+        else:
+            eng["detail"] = "HTTP %d" % r.status_code
+    except httpx.HTTPError as e:
+        eng["latency_ms"] = int((time.time() - t0) * 1000)
+        eng["detail"] = "%s: %s" % (type(e).__name__, e)
+    except Exception as e:
+        eng["latency_ms"] = int((time.time() - t0) * 1000)
+        eng["detail"] = type(e).__name__
+
+    db.log_action(host_id, user, "connectivity_test", "",
+                  json.dumps({"ssh": ssh.get("ok"), "engine": eng.get("ok")}, ensure_ascii=False),
+                  request.client.host if request.client else "")
+    return ok({"ok": ssh["ok"] and eng["ok"], "ssh": ssh, "engine": eng})
 
 
 @router.delete("/{host_id}")

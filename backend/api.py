@@ -16,11 +16,13 @@ VALID_WINDOWS = (300, 900, 3600, 14400, 86400, 604800, 2592000, 7776000)
 MEMORY_MAX_WINDOW = 3600
 RAW_MAX_WINDOW = 604800
 
-_LLAMA_COLS = {"gen_speed": 1, "prompt_speed": 2, "ctx_used": 3, "mtp_acceptance": 4}
+_LLAMA_COLS = {"gen_speed": 1, "prompt_speed": 2, "ctx_used": 3, "mtp_acceptance": 4,
+               "accept_length": 5}
 _HOST_COLS = {"cpu": 1, "mem_used": 2, "mem_buff_cache": 3, "swap_used": 4,
               "net_rx": 5, "net_tx": 6, "proc_cpu": 7,
               "load_1": 8, "load_5": 9, "load_15": 10}
-_LLAMA_1M_COLS = {"gen_speed": 1, "prompt_speed": 3, "ctx_used": 4, "mtp_acceptance": 5}
+_LLAMA_1M_COLS = {"gen_speed": 1, "prompt_speed": 3, "ctx_used": 4, "mtp_acceptance": 5,
+                  "accept_length": 6}
 _HOST_1M_COLS = {"cpu": 1, "mem_used": 2, "swap_used": 3,
                  "net_rx": 4, "net_tx": 5, "proc_cpu": 6}
 _GPU_KEYS = (("util", "gpu_util_"), ("mem", "gpu_mem_"), ("temp", "gpu_temp_"),
@@ -108,6 +110,8 @@ async def panel_health(request: Request):
         snap = m.snapshot()
         hosts[mid] = {
             "llama_online": snap["llama"]["online"],
+            "engine": snap["engine"]["type"],
+            "engine_online": snap["engine"]["online"],
             "ssh_ok": snap["host_metrics"].get("reachable", False),
         }
     return {"status": "ok", "hosts": hosts}

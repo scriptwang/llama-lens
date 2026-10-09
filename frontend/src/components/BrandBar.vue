@@ -2,8 +2,12 @@
   <header class="brandbar">
     <div class="brand">
       <span class="logo">◉</span>
-      <span class="name">llama灵境</span>
-      <span class="sub">llama-server 实时监控</span>
+      <span class="name">LLMLens</span>
+      <span class="sub">LLM 推理服务实时监控</span>
+      <nav class="viewnav">
+        <button :class="{ on: route.name === 'portal' }" @click="go('portal')">主机</button>
+        <button :class="{ on: route.name === 'cluster' }" @click="go('cluster')">集群</button>
+      </nav>
     </div>
     <div class="stats mono">
       <span>主机 <b>{{ hostsTotal }}</b></span>
@@ -26,6 +30,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import LiveClock from './LiveClock.vue'
 import ThemeSwitcher from './ThemeSwitcher.vue'
 import AccountMenu from './AccountMenu.vue'
@@ -33,6 +38,9 @@ import HostManager from './HostManager.vue'
 import { totalSpeed as globalSpeed } from '../speed'
 
 const hostMgr = ref(false)
+const router = useRouter()
+const route = useRoute()
+function go(name) { router.push(name === 'portal' ? '/' : '/cluster') }
 
 const props = defineProps({
   hosts: { type: Array, default: () => [] },
@@ -49,6 +57,13 @@ watch(totalSpeed, (v) => { globalSpeed.value = v }, { immediate: true })
 </script>
 
 <style scoped>
+.viewnav { display: flex; gap: 4px; margin-left: 18px; }
+.viewnav button {
+  background: transparent; color: var(--text-dim); border: 1px solid transparent;
+  border-radius: 6px; font-size: 12px; padding: 3px 12px; cursor: pointer; font-family: inherit;
+}
+.viewnav button:hover { color: var(--text); }
+.viewnav button.on { color: var(--cyan); border-color: var(--card-border); background: rgba(0, 229, 255, 0.08); }
 .ctl-entry {
   background: rgba(16, 24, 40, 0.55);
   color: var(--text-dim);

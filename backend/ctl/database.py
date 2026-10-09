@@ -34,6 +34,15 @@ CREATE TABLE IF NOT EXISTS hosts (
   log_catchup_sec INTEGER NOT NULL DEFAULT 30,
   disk_mounts   TEXT    NOT NULL DEFAULT '["/"]',
   thresholds    TEXT,
+  gateway_excluded INTEGER NOT NULL DEFAULT 0,
+  engine_type     TEXT    NOT NULL DEFAULT 'llama_cpp',
+  engine_host     TEXT    NOT NULL DEFAULT '',
+  engine_port     INTEGER NOT NULL DEFAULT 0,
+  engine_interval REAL    NOT NULL DEFAULT 1.0,
+  engine_slow_interval REAL NOT NULL DEFAULT 30.0,
+  engine_timeout  REAL    NOT NULL DEFAULT 3.0,
+  engine_api_key_enc TEXT,
+  process_cmdline TEXT    NOT NULL DEFAULT '',
   created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
   last_connected_at TEXT,
   UNIQUE (host, port, username)
@@ -114,6 +123,15 @@ _HOSTS_MIGRATIONS = {
     "notify_enabled": "ALTER TABLE hosts ADD COLUMN notify_enabled INTEGER NOT NULL DEFAULT 0",
     "notify_type": "ALTER TABLE hosts ADD COLUMN notify_type TEXT NOT NULL DEFAULT 'wecom'",
     "notify_url": "ALTER TABLE hosts ADD COLUMN notify_url TEXT NOT NULL DEFAULT ''",
+    "gateway_excluded": "ALTER TABLE hosts ADD COLUMN gateway_excluded INTEGER NOT NULL DEFAULT 0",
+    "engine_type": "ALTER TABLE hosts ADD COLUMN engine_type TEXT NOT NULL DEFAULT 'llama_cpp'",
+    "engine_host": "ALTER TABLE hosts ADD COLUMN engine_host TEXT NOT NULL DEFAULT ''",
+    "engine_port": "ALTER TABLE hosts ADD COLUMN engine_port INTEGER NOT NULL DEFAULT 0",
+    "engine_interval": "ALTER TABLE hosts ADD COLUMN engine_interval REAL NOT NULL DEFAULT 1.0",
+    "engine_slow_interval": "ALTER TABLE hosts ADD COLUMN engine_slow_interval REAL NOT NULL DEFAULT 30.0",
+    "engine_timeout": "ALTER TABLE hosts ADD COLUMN engine_timeout REAL NOT NULL DEFAULT 3.0",
+    "engine_api_key_enc": "ALTER TABLE hosts ADD COLUMN engine_api_key_enc TEXT",
+    "process_cmdline": "ALTER TABLE hosts ADD COLUMN process_cmdline TEXT NOT NULL DEFAULT ''",
 }
 
 

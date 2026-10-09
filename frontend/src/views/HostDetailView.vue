@@ -6,6 +6,7 @@
       :model-name="modelName"
       :model-title="modelTitle"
       :llama-online="llamaOnline"
+      :engine-type="engineType"
       :ssh-ok="sshOk"
       :stats="topStats"
       :mode="mode"
@@ -14,7 +15,7 @@
       @update:mode="setMode"
     />
 
-    <div v-if="!llamaOnline && !sshOk" class="banner-danger">主机不可达（llama 离线 + SSH 断开）</div>
+    <div v-if="!llamaOnline && !sshOk" class="banner-danger">主机不可达（{{ engineLabel }} 离线 + SSH 断开）</div>
 
     <!-- 平级 Tab：监控 / 服务（?tab=service 可深链） -->
     <nav ref="tabsRef" class="tabs">
@@ -66,7 +67,7 @@
               :foot="promptFoot"
             />
             <BarCard
-              title="上下文占用"
+              :title="isSglang ? 'KV / 上下文占用' : '上下文占用'"
               :value="ctxUsedVal"
               :level="ctxLevel"
               :bar-max="ctxTotal"
@@ -77,6 +78,7 @@
               :fmt-compact="fmtTokens"
             />
             <GaugeCard
+              v-if="!isSglang"
               title="MTP 接受率"
               :value="mtpPct"
               unit="%"
@@ -85,6 +87,15 @@
               :sub="mtpGaugeSub"
               :zones="mtpZones"
               :zone-colors="mtpZoneColors"
+            />
+            <BarCard
+              v-else
+              title="投机接受长度"
+              :value="specLen"
+              unit="tok/step"
+              :spark="sparkSpec"
+              :sub="specSub"
+              :digits="2"
             />
           </div>
         </section>
@@ -102,7 +113,8 @@
         <section id="sec-task">
           <div class="section-title">实时生成任务</div>
           <div class="task-row">
-            <LlamaStateCard :log="snap.llama.log" :online="llamaOnline" :slots="slots" :flags="flags" :now="snap.ts" />
+            <LlamaStateCard v-if="!isSglang" :log="snap.llama.log" :online="llamaOnline" :slots="slots" :flags="flags" :now="snap.ts" />
+            <SglangStateCard v-else :engine="eng" :online="llamaOnline" />
             <EventFeed :events="events" fill />
           </div>
         </section>
@@ -125,10 +137,10 @@
 
         <!-- ============ 模型与 Slot 区 ============ -->
         <section id="sec-model">
-          <div class="section-title">模型与 Slot</div>
+          <div class="section-title">{{ isSglang ? "模型" : "模型与 Slot" }}</div>
           <div class="model-grid">
             <ModelInfoCard :model="model" />
-            <SlotTable :slots="slots" />
+            <SlotTable v-if="!isSglang" :slots="slots" />
           </div>
         </section>
 
@@ -137,7 +149,12 @@
           <div class="section-title">进程</div>
           <template v-if="sshOk">
             <div class="proc-grid">
-              <LlamaProcessCard :process="process" :service="service" />
+              <LlamaProcessCard
+                :process="process"
+                :service="service"
+                :title="isSglang ? 'sglang serve 进程' : 'llama-server 进程'"
+                :not-found-text="isSglang ? '未找到 sglang 进程（按 cmdline 固定串匹配）' : ''"
+              />
               <div class="proc-side">
                 <TopProcessTable :rows="topCpu" mode="cpu" />
                 <TopProcessTable :rows="topMem" mode="mem" />
@@ -172,11 +189,12 @@
             />
           </div>
           <div class="trend-grid">
-            <div class="trend-group">llama</div>
+            <div class="trend-group">{{ isSglang ? 'SGLang' : 'llama' }}</div>
             <TrendChart title="Token 生成速度" unit="tok/s" :series="chartGen" :span="isCustom ? customSpan : liveSpan" :x-min="xMin" :x-max="xMax" :height="170" />
             <TrendChart title="预填充速度" unit="tok/s" :series="chartPrompt" :span="isCustom ? customSpan : liveSpan" :x-min="xMin" :x-max="xMax" :height="170" />
             <TrendChart title="上下文占用" unit="tokens" :series="chartCtx" :span="isCustom ? customSpan : liveSpan" :x-min="xMin" :x-max="xMax" :height="170" />
-            <TrendChart title="MTP 接受率" unit="%" :series="chartMtp" :span="isCustom ? customSpan : liveSpan" :x-min="xMin" :x-max="xMax" :height="170" :y-max="100" :y-min="0" />
+            <TrendChart v-if="!isSglang" title="MTP 接受率" unit="%" :series="chartMtp" :span="isCustom ? customSpan : liveSpan" :x-min="xMin" :x-max="xMax" :height="170" :y-max="100" :y-min="0" />
+            <TrendChart v-else title="投机接受长度" unit="tok/step" :series="chartSpec" :span="isCustom ? customSpan : liveSpan" :x-min="xMin" :x-max="xMax" :height="170" />
             <div class="trend-group">GPU</div>
             <TrendChart title="GPU 利用率" unit="%" :series="chartGpuUtil" :span="isCustom ? customSpan : liveSpan" :x-min="xMin" :x-max="xMax" :height="170" :y-max="100" />
             <TrendChart title="GPU 显存" unit="MB" :series="chartGpuMem" :span="isCustom ? customSpan : liveSpan" :x-min="xMin" :x-max="xMax" :height="170" />
@@ -231,19 +249,11 @@
         :host-label="hostName"
       />
 
-      <!-- ============ 请求 Tab（llama-server 请求历史明细） ============ -->
-      <RequestsTab
-        v-show="currentTab === 'requests'"
+      <!-- ============ 网关 Tab（该主机在统一网关里的状态 + 流量切片） ============ -->
+      <GatewayTab
+        v-show="currentTab === 'gateway'"
         :host-id="props.id"
-        :active="currentTab === 'requests'"
-        :host-label="hostName"
-      />
-
-      <!-- ============ API Tab（OpenAI 兼容接入信息） ============ -->
-      <ApiAccessTab
-        v-show="currentTab === 'api'"
-        :host-id="props.id"
-        :active="currentTab === 'api'"
+        :active="currentTab === 'gateway'"
         :host-label="hostName"
         :snap="snap"
       />
@@ -265,6 +275,7 @@ import TopBar from '../components/TopBar.vue'
 import BarCard from '../components/BarCard.vue'
 import GaugeCard from '../components/GaugeCard.vue'
 import LlamaStateCard from '../components/LlamaStateCard.vue'
+import SglangStateCard from '../components/SglangStateCard.vue'
 import GpuPanel from '../components/GpuPanel.vue'
 import CpuPanel from '../components/CpuPanel.vue'
 import MemPanel from '../components/MemPanel.vue'
@@ -280,8 +291,7 @@ import ServiceTab from '../components/ServiceTab.vue'
 import TerminalTab from '../components/TerminalTab.vue'
 import ModelTab from '../components/ModelTab.vue'
 import PlaygroundTab from '../components/PlaygroundTab.vue'
-import RequestsTab from '../components/RequestsTab.vue'
-import ApiAccessTab from '../components/ApiAccessTab.vue'
+import GatewayTab from '../components/GatewayTab.vue'
 import EfficiencyCard from '../components/EfficiencyCard.vue'
 import AutoBrowseBar from '../components/AutoBrowseBar.vue'
 
@@ -299,18 +309,17 @@ const TAB_DEFS = [
   { key: 'terminal', label: '终端' },
   { key: 'model', label: '模型' },
   { key: 'playground', label: '测试' },
-  { key: 'requests', label: '请求' },
-  { key: 'api', label: 'API' },
+  { key: 'gateway', label: '网关' },
 ]
 // UI 功能开关（config.yaml ui 段）：TAB 显隐 + 自动浏览默认开关
-const uiCfg = ref({ tabs: { monitor: true, service: true, terminal: true, model: true, playground: true, requests: true, api: true }, auto_browse: { enabled: false } })
+const uiCfg = ref({ tabs: { monitor: true, service: true, terminal: true, model: true, playground: true, gateway: true }, auto_browse: { enabled: false } })
 async function loadUiCfg() {
   try { uiCfg.value = await api.uiConfig() } catch (e) { /* 保持默认全显 */ }
 }
 const visibleTabs = computed(() => TAB_DEFS.filter((t) => uiCfg.value.tabs && uiCfg.value.tabs[t.key] !== false))
 const tab = computed(() => {
   const t = route.query.tab
-  if (t === 'service' || t === 'terminal' || t === 'model' || t === 'playground' || t === 'requests' || t === 'api') return t
+  if (t === 'service' || t === 'terminal' || t === 'model' || t === 'playground' || t === 'gateway') return t
   return 'monitor'
 })
 // 当前 Tab：路由指定的 Tab 被配置隐藏时，回退到第一个可见 Tab
@@ -386,6 +395,12 @@ const events = computed(() => (snap.value ? snap.value.events : []))
 const llamaOnline = computed(() => !!(snap.value && snap.value.llama.online))
 const sshOk = computed(() => !!(snap.value && snap.value.host_metrics.reachable))
 
+// 引擎类型（llama_cpp / sglang）：决定各区域展示形态
+const eng = computed(() => (snap.value ? snap.value.engine || {} : {}))
+const engineType = computed(() => eng.value.type || 'llama_cpp')
+const isSglang = computed(() => engineType.value === 'sglang')
+const engineLabel = computed(() => (isSglang.value ? 'SGLang' : 'llama'))
+
 // 当前主机生成速度同步到全局：浏览器标签页标题（App.vue）与 Terminal 窗口标题栏
 // （TerminalFrame.vue）据此展示，使详情页也能看到速度（BrandBar 只覆盖门户页）。
 // snap 未就绪时为 null，不写入，避免切换视图瞬间标题闪回 0。
@@ -399,7 +414,7 @@ const offlineNote = computed(() =>
 )
 
 // ---------------- AI 核心 ----------------
-const ctx = computed(() => (llama.value.log && llama.value.log.context) || {})
+const ctx = computed(() => eng.value.ctx || (llama.value.log && llama.value.log.context) || {})
 const mtp = computed(() => (llama.value.log && llama.value.log.mtp) || {})
 const flags = computed(() => (hm.value.process && hm.value.process.flags) || {})
 
@@ -445,6 +460,10 @@ const lastPrefill = computed(() => {
 })
 const promptVal = computed(() => {
   if (!llamaOnline.value) return null
+  if (isSglang.value) {
+    const v = snap.value && snap.value.llama ? snap.value.llama.prompt_speed_tps : null
+    return v === null || v === undefined ? 0 : v
+  }
   const st = llama.value.log && llama.value.log.state
   if (st && st.phase === 'prompt_processing') {
     const v = snap.value && snap.value.llama ? snap.value.llama.prompt_speed_tps : null
@@ -453,6 +472,7 @@ const promptVal = computed(() => {
   return 0
 })
 const promptSub = computed(() => {
+  if (isSglang.value) return speedSub.value
   const st = llama.value.log && llama.value.log.state
   if (llamaOnline.value && st && st.phase === 'prompt_processing') return speedSub.value
   const lp = lastPrefill.value
@@ -475,6 +495,7 @@ const prefillProgress = computed(() => {
   return p === null || p === undefined ? null : p
 })
 const promptFoot = computed(() => {
+  if (isSglang.value) return ''
   const st = llama.value.log && llama.value.log.state
   if (st && st.phase === 'prompt_processing') {
     const parts = []
@@ -510,18 +531,22 @@ const topStats = computed(() => {
   const s = snap.value
   if (!s) return null
   const ll = s.llama || {}
+  const en = s.engine || ll || {}
   const hm = s.host_metrics || {}
   const log = ll.log || {}
-  const ctx = log.context || {}
+  const ctx = en.ctx || log.context || {}
   const mtp = log.mtp || {}
   const mem = hm.mem || {}
   const cpu = hm.cpu || {}
+  const spec = en.speculative || {}
   return {
     online: !!ll.online,
     gen: ll.gen_speed_tps,
     prompt: ll.prompt_speed_tps,
     speedSource: ll.speed_source || '',
+    engineType: en.type || 'llama_cpp',
     mtp: mtp.acceptance === null || mtp.acceptance === undefined ? null : mtp.acceptance * 100,
+    spec: spec.accept_length === null || spec.accept_length === undefined ? null : spec.accept_length,
     ctxUsed: ctx.used,
     ctxRemain: ctx.remaining,
     ctxTotal: ctx.total,
@@ -570,6 +595,18 @@ function mapTail(name, fn) {
 
 const sparkCtx = computed(() => mapTail('ctx_used', (v) => v))
 const sparkMtp = computed(() => mapTail('mtp_acceptance', (v) => v * 100))
+const sparkSpec = computed(() => mapTail('accept_length', (v) => v))
+const specLen = computed(() => {
+  const a = eng.value.speculative && eng.value.speculative.accept_length
+  return a === null || a === undefined ? null : a
+})
+const specSub = computed(() => {
+  const spec = eng.value.speculative || {}
+  const parts = []
+  if (spec.algorithm) parts.push(spec.algorithm)
+  if (spec.num_draft_tokens) parts.push(`draft ${spec.num_draft_tokens}`)
+  return parts.join(' · ')
+})
 
 // ---------------- 趋势图 ----------------
 const windows = [
@@ -747,6 +784,10 @@ const chartCtx = computed(() => {
     }
   }
   return [s]
+})
+const chartSpec = computed(() => {
+  const s = seriesOf('accept_length', { name: '接受长度', color: chartTheme().green, step: true, connectNulls: true })
+  return s ? [s] : []
 })
 const chartMtp = computed(() => {
   const s = seriesOf('mtp_acceptance', { name: '接受率', color: chartTheme().green, step: true, connectNulls: true })

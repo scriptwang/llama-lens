@@ -60,6 +60,7 @@ def _ui_config() -> dict:
             "terminal": _bool(tabs.get("terminal"), True),
             "requests": _bool(tabs.get("requests"), True),
             "api": _bool(tabs.get("api"), True),
+            "gateway": _bool(tabs.get("gateway"), True),
         },
         "auto_browse": {
             "enabled": _bool(ab.get("enabled"), False),
@@ -94,13 +95,15 @@ def _ensure_secret_file(name: str, gen) -> str:
 
 
 # 内置扫描规则（config.yaml 无 scan 段且数据库无记录时的兜底）
+# 覆盖面板支持的全部引擎（ENGINE_TYPES: llama_cpp / sglang），多引擎服务均可被扫描识别
 BUILTIN_SCAN_RULES = {
-    "name_keywords": ["llama"],
+    "name_keywords": ["llama", "sglang"],
     "binary_names": [
         "llama-server", "llama-cli", "llama-bench", "llama-quantize",
         "llama-gguf", "llama-perplexity", "llama-tokenizer", "main",
+        "sglang",
     ],
-    "content_markers": [".gguf"],
+    "content_markers": [".gguf", "sglang"],
 }
 
 
