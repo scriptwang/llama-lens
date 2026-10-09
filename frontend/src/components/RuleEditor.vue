@@ -4,7 +4,7 @@
       type="info"
       :closable="false"
       class="mb8"
-      title="服务识别 = 名称匹配 或 内容匹配。内容匹配会扫描单元文件中的可执行文件名与标记，因此即使服务不叫 llama 也能被识别。"
+      title="服务识别 = 名称匹配 或 内容匹配。内容匹配会扫描单元文件中的可执行文件名与标记，因此即使服务名不含 llama/sglang 也能被识别。"
     />
     <el-form label-width="110px">
       <el-form-item label="名称关键词">

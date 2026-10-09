@@ -60,19 +60,22 @@ class EventDetector:
             except Exception:
                 pass  # 推送失败不影响事件检测
 
-    def set_llama_online(self, ts: float, online: bool, model_name: str = "") -> None:
+    def set_llama_online(self, ts: float, online: bool, model_name: str = "",
+                         engine_name: str = "llama") -> None:
         if self._llama_online is None:
             self._llama_online = online
             if online:
-                self.emit(ts, "info", "llama_up", "llama 上线" + (" · 模型 %s" % model_name if model_name else ""))
+                self.emit(ts, "info", "llama_up", "%s 上线" % engine_name
+                          + (" · 模型 %s" % model_name if model_name else ""))
             return
         if online != self._llama_online:
             self._llama_online = online
             if online:
-                self.emit(ts, "info", "llama_up", "llama 恢复在线" + (" · 模型 %s" % model_name if model_name else ""))
+                self.emit(ts, "info", "llama_up", "%s 恢复在线" % engine_name
+                          + (" · 模型 %s" % model_name if model_name else ""))
             else:
                 self.reset_task_state()
-                self.emit(ts, "error", "llama_down", "llama 离线")
+                self.emit(ts, "error", "llama_down", "%s 离线" % engine_name)
 
     def set_ssh_connected(self, ts: float, connected: bool) -> None:
         if self._ssh_connected is None:
@@ -215,6 +218,7 @@ class EventDetector:
         "mem": "内存",
         "ctx": "上下文",
         "mtp": "MTP 接受率",
+        "queue": "请求队列",
     }
     _GPU_KIND_NAMES = {"util": "利用率", "mem": "显存", "temp": "温度", "power": "功耗"}
 
@@ -235,7 +239,7 @@ class EventDetector:
         30s，防阈值边缘抖动（被抑制的变化只更新状态不发事件）。
         llama/ssh 已有专门的上下线事件，不在此重复。"""
         now = time.time()
-        current = {a["metric"]: a for a in alerts if a.get("metric") not in ("llama", "ssh")}
+        current = {a["metric"]: a for a in alerts if a.get("metric") not in ("llama", "ssh", "engine")}
         for metric, a in current.items():
             level = a.get("level", "warn")
             prev = self._alert_levels.get(metric)
@@ -291,6 +295,8 @@ def _fmt_alert_val(metric: str, v: Any) -> str:
     if v is None:
         return "—"
     s = ("%.1f" % v) if isinstance(v, float) else str(v)
+    if metric == "queue":
+        return s + " 个"
     if metric.endswith(".temp"):
         return s + "°C"
     return s + "%"

@@ -4,6 +4,7 @@
       <span class="dot" :class="dotClass"></span>
       <span class="hostname">{{ host.name }}</span>
       <span class="hid mono faint">{{ host.id }}</span>
+      <span v-if="host.engine_name" class="engine-tag mono">{{ host.engine_name }}</span>
       <span v-if="host.alerts_count > 0" class="alert-badge mono">{{ host.alerts_count }}</span>
     </div>
 
@@ -37,7 +38,7 @@
       <span>MEM <b :class="valClass(host.mem_pct)">{{ host.mem_pct === null ? '—' : Math.round(host.mem_pct) + '%' }}</b></span>
       <span v-if="tokensPerDay !== null" class="eff" title="近 24h Token 产出">⚡ {{ fmtTokens(tokensPerDay) }}/天</span>
       <span v-if="!host.ssh_ok" class="lv-warn">SSH 断开</span>
-      <span v-if="!host.online" class="lv-danger">llama 离线</span>
+      <span v-if="!host.online" class="lv-danger">{{ host.engine_type === 'sglang' ? 'SGLang 离线' : 'llama 离线' }}</span>
     </div>
   </router-link>
 </template>
@@ -108,6 +109,7 @@ function valClass(v) {
 .top { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .hostname { font-size: 15px; font-weight: 600; }
 .hid { font-size: 11px; }
+.engine-tag { font-size: 10px; color: var(--cyan); border: 1px solid rgba(0,229,255,0.35); border-radius: 8px; padding: 0 6px; }
 .alert-badge {
   margin-left: auto;
   background: var(--red);

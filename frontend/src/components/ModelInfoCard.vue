@@ -20,6 +20,10 @@
         <div class="kv"><span class="k">n_ctx_train</span><span class="v mono">{{ fmtNum(model.n_ctx_train) }}</span></div>
         <div class="kv"><span class="k">文件体积</span><span class="v mono">{{ sizeText }}</span></div>
         <div class="kv"><span class="k">mmproj</span><span class="v mono">{{ mmprojText }}</span></div>
+        <div v-if="model.quantization" class="kv"><span class="k">量化</span><span class="v mono">{{ model.quantization }}</span></div>
+        <div v-if="model.kv_cache_dtype" class="kv"><span class="k">KV 缓存</span><span class="v mono">{{ model.kv_cache_dtype }}</span></div>
+        <div v-if="model.max_model_len" class="kv"><span class="k">最大上下文</span><span class="v mono">{{ fmtNum(model.max_model_len) }}</span></div>
+        <div v-if="model.model_type" class="kv"><span class="k">model_type</span><span class="v mono">{{ model.model_type }}</span></div>
       </div>
       <div class="kv">
         <span class="k">模态</span>

@@ -6,8 +6,8 @@ from backend.history import HistoryStore, HistoryWriter
 
 def test_store_write_query(tmp_path):
     store = HistoryStore(str(tmp_path / "h.db"))
-    store.write_llama([("h1", 1000, 10.0, 20.0, 100, None),
-                       ("h1", 1001, 11.0, 21.0, 101, 0.9)])
+    store.write_llama([("h1", 1000, 10.0, 20.0, 100, None, None),
+                       ("h1", 1001, 11.0, 21.0, 101, 0.9, 3.5)])
     store.write_host([("h1", 1000, 50.0, 1000.0, 100.0, 5.0, 1.0, 2.0,
                        0.5, 0.4, 0.3, 0.2, json.dumps({"0": {"util": 90.0}}))])
     assert len(store.query_llama("h1", 999, 1002)) == 2
@@ -36,7 +36,7 @@ def test_aggregate_minute(tmp_path):
     store = HistoryStore(str(tmp_path / "h.db"))
     m = 1800000000  # 分钟边界
     for i in range(60):
-        store.write_llama([("h1", m + i, 10.0 + i, 20.0, 100 + i, None)])
+        store.write_llama([("h1", m + i, 10.0 + i, 20.0, 100 + i, None, 3.5 + i)])
         store.write_host([("h1", m + i, 50.0, 1000.0 + i, None, 1.0, 1.0,
                            2.0, None, None, None, None, None)])
     store.aggregate_minute("h1", m)

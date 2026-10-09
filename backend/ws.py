@@ -140,16 +140,32 @@ async def ws_host(ws: WebSocket, host_id: str):
             pass
 
 
+def _portal_payload(app) -> list:
+    """门户快照 + 网关排除标注。
+
+    registry.list() 只含监控字段，不含 gateway_excluded；集群页（总览「主机与模型」、
+    接入链路图）据此显示「已排除」，与主机详情里的网关开关保持一致。
+    """
+    registry = app.state.registry
+    hosts = registry.list()
+    gw = getattr(app.state, "gateway", None)
+    excluded = (gw or {}).get("excluded") or set()
+    for h in hosts:
+        h["gateway_excluded"] = h.get("id") in excluded
+    return hosts
+
+
 @router.websocket("/ws/portal")
 async def ws_portal(ws: WebSocket):
     if not _ws_auth(ws):
         await ws.close(code=4401)
         return
-    registry = ws.app.state.registry
+    app = ws.app
+    registry = app.state.registry
     await ws.accept()
     hub = getattr(registry, "_portal_hub", None)
     if hub is None:
-        hub = _Fanout(registry.list, registry.app_cfg.global_cfg.push_interval)
+        hub = _Fanout(lambda: _portal_payload(app), registry.app_cfg.global_cfg.push_interval)
         registry._portal_hub = hub
     hub.add(ws)
     try:

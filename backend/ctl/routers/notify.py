@@ -31,5 +31,5 @@ async def notify_test(host_id: int, req: NotifyTestReq = NotifyTestReq(),
         raise ApiError(VALIDATION_FAILED, "notify_type 必须是 %s 之一" % "/".join(CHANNELS))
     name = row["alias"] or row["host"]
     await send_async(ntype, nurl, name, "info",
-                     "测试消息", "LlamaLens 告警推送配置成功（这是一条测试消息）")
+                     "测试消息", "LLMLens 告警推送配置成功（这是一条测试消息）")
     return ok({"sent": True, "channel": ntype})

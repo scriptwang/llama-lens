@@ -2,12 +2,12 @@
   <div class="tab-pane api-scope">
     <div class="api-toolbar">
       <span class="api-title">API 接入</span>
-      <span class="api-sub">llama-server 兼容 OpenAI 接口，其他应用可直接调用</span>
+      <span class="api-sub">推理服务兼容 OpenAI 接口，其他应用可直接调用</span>
       <span class="api-spacer" />
       <el-button size="small" @click="loadHost">刷新</el-button>
     </div>
     <div v-if="!baseUrl" class="api-empty">
-      暂无法获取 llama-server 监听地址（未配置日志采集或服务未启动），请先到「模型」页确认服务状态
+      暂无法获取服务监听地址（未配置日志采集或服务未启动），请先到「模型」页确认服务状态
     </div>
     <div v-else class="api-grid">
       <div class="api-card">

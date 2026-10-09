@@ -1,7 +1,7 @@
 <template>
   <div class="proc glass">
     <div class="panel-head">
-      <span class="panel-title">llama-server 进程</span>
+      <span class="panel-title">{{ title }}</span>
       <span v-if="!found" class="badge warn">未找到进程</span>
     </div>
 
@@ -44,7 +44,7 @@
       </div>
     </template>
 
-    <div v-else class="placeholder"><span class="icon">⌁</span>未找到 llama-server 进程（可能以其他名称运行）</div>
+    <div v-else class="placeholder"><span class="icon">⌁</span>{{ notFoundText || '未找到 llama-server 进程（可能以其他名称运行）' }}</div>
   </div>
 </template>
 
@@ -54,7 +54,9 @@ import { fmtBytes } from '../utils'
 
 const props = defineProps({
   process: { type: Object, default: () => ({}) },
-  service: { type: Object, default: () => ({}) }
+  service: { type: Object, default: () => ({}) },
+  title: { type: String, default: 'llama-server 进程' },
+  notFoundText: { type: String, default: '' }
 })
 
 const cmdOpen = ref(true)

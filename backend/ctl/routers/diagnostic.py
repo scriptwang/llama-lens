@@ -29,7 +29,7 @@ def _build_markdown(row, snap, services, events, err_logs) -> str:
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     name = row["alias"] or row["host"]
     L = []
-    L.append("# LlamaLens 体检报告 — %s (%s:%d)" % (name, row["host"], row["port"]))
+    L.append("# LLMLens 体检报告 — %s (%s:%d)" % (name, row["host"], row["port"]))
     L.append("")
     L.append("生成时间：%s" % now)
     L.append("")
@@ -42,7 +42,7 @@ def _build_markdown(row, snap, services, events, err_logs) -> str:
         alerts = snap.get("alerts") or []
         danger = [a for a in alerts if a["level"] == "danger"]
         warn = [a for a in alerts if a["level"] == "warn"]
-        L.append("- llama：%s" % ("在线" if ll.get("online") else "离线"))
+        L.append("- 引擎：%s" % ("在线" if ll.get("online") else "离线"))
         L.append("- SSH：%s" % ("已连接" if hm.get("reachable") else "断开"))
         L.append("- 告警：%d 条（danger %d / warn %d）" % (len(alerts), len(danger), len(warn)))
         for a in (danger + warn)[:10]:
@@ -111,7 +111,7 @@ def _build_markdown(row, snap, services, events, err_logs) -> str:
     L.append("")
 
     # ---- llama API ----
-    L.append("## llama API")
+    L.append("## 引擎 API")
     if snap:
         ll = snap.get("llama") or {}
         model = ll.get("model") or {}

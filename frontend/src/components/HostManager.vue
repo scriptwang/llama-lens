@@ -17,10 +17,11 @@
           <span v-else class="bp-empty">未配置</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="236">
+      <el-table-column label="操作" width="280">
         <template #default="{ row }">
           <div class="row-ops">
             <el-button size="small" text type="primary" :loading="testingId === row.id" @click="test(row)">测试</el-button>
+            <el-button size="small" text type="primary" :loading="connTestingId === row.id" @click="testConnectivity(row)">连通性</el-button>
             <el-button size="small" text type="primary" @click="openEdit(row)">编辑</el-button>
             <el-button size="small" text type="danger" @click="remove(row)">删除</el-button>
           </div>
@@ -66,6 +67,35 @@
         </el-form-item>
         <el-form-item label="文件浏览快捷目录（逗号分隔）">
           <el-input v-model="editForm.browse_paths" placeholder="如 /share,/models；填 / 可浏览全部目录（所有文件选择器都从这里取快捷目录）" />
+        </el-form-item>
+        <el-divider content-position="left">推理引擎</el-divider>
+        <div class="form-grid">
+          <el-form-item label="引擎类型">
+            <el-select v-model="editForm.engine_type" style="width: 100%">
+              <el-option label="llama.cpp" value="llama_cpp" />
+              <el-option label="SGLang" value="sglang" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="引擎端口（0 = 用 llama 端口）">
+            <el-input-number v-model="editForm.engine_port" :min="0" :max="65535" style="width: 100%" />
+          </el-form-item>
+        </div>
+        <el-form-item label="引擎地址（留空 = 跟随主机地址）">
+          <el-input v-model="editForm.engine_host" placeholder="如 192.168.1.10，留空则与主机相同" />
+        </el-form-item>
+        <div class="form-grid">
+          <el-form-item label="快采样间隔（秒）">
+            <el-input-number v-model="editForm.engine_interval" :min="0.2" :step="0.5" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="慢采样间隔（秒）">
+            <el-input-number v-model="editForm.engine_slow_interval" :min="1" :step="5" style="width: 100%" />
+          </el-form-item>
+        </div>
+        <el-form-item label="进程匹配串（SSH 找进程用，留空按类型默认）">
+          <el-input v-model="editForm.process_cmdline" placeholder="如 sglang serve；仅允许字母数字及 . _ : / + - 空格" />
+        </el-form-item>
+        <el-form-item label="API Key（SGLang 可选，留空 = 不修改；加密存储不回传）">
+          <el-input v-model="editForm.engine_api_key" type="password" show-password placeholder="留空保持原 Key" />
         </el-form-item>
         <el-divider content-position="left">告警推送</el-divider>
         <el-form-item label="启用告警推送（webhook）">
@@ -157,7 +187,7 @@ const hosts = ref([])
 const testingId = ref(0)
 const showEdit = ref(false)
 const savingEdit = ref(false)
-const editForm = reactive({ id: 0, host: '', port: 22, username: '', auth_type: 'password', password: '', key_data: '', key_passphrase: '', alias: '', browse_paths: '', notify_enabled: false, notify_type: 'wecom', notify_url: '' })
+const editForm = reactive({ id: 0, host: '', port: 22, username: '', auth_type: 'password', password: '', key_data: '', key_passphrase: '', alias: '', browse_paths: '', notify_enabled: false, notify_type: 'wecom', notify_url: '', engine_type: 'llama_cpp', engine_host: '', engine_port: 0, engine_interval: 1.0, engine_slow_interval: 30.0, process_cmdline: '', engine_api_key: '' })
 const showCreate = ref(false)
 const savingCreate = ref(false)
 const createForm = reactive({
@@ -182,6 +212,20 @@ async function test(row) {
   }
 }
 
+const connTestingId = ref(0)
+async function testConnectivity(row) {
+  connTestingId.value = row.db_id
+  try {
+    const r = await http.post(`/hosts/${row.db_id}/connectivity-test`)
+    const fmt = (label, x) => `${label}：${x.ok ? `正常 ${x.latency_ms}ms` : `失败${x.detail ? `（${x.detail}）` : ''}`}`
+    const parts = [fmt('SSH', r.ssh), fmt('引擎', r.engine)]
+    if (r.ok) ElMessage.success(parts.join('，'))
+    else ElMessage.warning(parts.join('，'))
+  } finally {
+    connTestingId.value = 0
+  }
+}
+
 function openEdit(row) {
   editForm.id = row.db_id
   editForm.host = row.host || ''
@@ -196,6 +240,13 @@ function openEdit(row) {
   editForm.notify_enabled = !!row.notify_enabled
   editForm.notify_type = row.notify_type || 'wecom'
   editForm.notify_url = row.notify_url || ''
+  editForm.engine_type = row.engine_type || 'llama_cpp'
+  editForm.engine_host = row.engine_host || ''
+  editForm.engine_port = row.engine_port || 0
+  editForm.engine_interval = row.engine_interval || 1.0
+  editForm.engine_slow_interval = row.engine_slow_interval || 30.0
+  editForm.process_cmdline = row.process_cmdline || ''
+  editForm.engine_api_key = ''
   showEdit.value = true
 }
 
@@ -212,6 +263,13 @@ async function saveEdit() {
       key_passphrase: editForm.key_passphrase || null,
       alias: editForm.alias,
       browse_paths: editForm.browse_paths,
+      engine_type: editForm.engine_type,
+      engine_host: editForm.engine_host,
+      engine_port: editForm.engine_port,
+      engine_interval: editForm.engine_interval,
+      engine_slow_interval: editForm.engine_slow_interval,
+      process_cmdline: editForm.process_cmdline,
+      engine_api_key: editForm.engine_api_key || null,
       notify_enabled: editForm.notify_enabled,
       notify_type: editForm.notify_type,
       notify_url: editForm.notify_url.trim(),

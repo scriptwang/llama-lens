@@ -9,9 +9,8 @@ from .config import INVERTED_METRICS
 
 
 def evaluate_alerts(thresholds: Dict[str, Dict[str, float]],
-                    llama: Dict[str, Any],
-                    host_metrics: Dict[str, Any],
-                    log_state: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+                    engine: Dict[str, Any],
+                    host_metrics: Dict[str, Any]) -> List[Dict[str, Any]]:
     alerts: List[Dict[str, Any]] = []
 
     def add(metric: str, level: str, value: Any, threshold: Any) -> None:
@@ -34,8 +33,9 @@ def evaluate_alerts(thresholds: Dict[str, Dict[str, float]],
                 add(metric, "warn", value, warn)
 
     # 服务级
-    if not llama.get("online"):
-        add("llama", "danger", 0, 1)
+    etype = engine.get("type", "llama_cpp")
+    if not engine.get("online"):
+        add("llama" if etype == "llama_cpp" else "engine", "danger", 0, 1)
     if not host_metrics.get("reachable"):
         add("ssh", "warn", 0, 1)
 
@@ -57,12 +57,16 @@ def evaluate_alerts(thresholds: Dict[str, Dict[str, float]],
     for mnt in (host_metrics.get("disk") or {}).get("mounts") or []:
         check("disk:%s" % mnt.get("mount"), mnt.get("use_pct"), "disk")
 
-    # 上下文 / MTP（来自日志）
-    if log_state:
-        ctx = log_state.get("context") or {}
-        check("ctx", ctx.get("pct"), "ctx")
-        mtp = log_state.get("mtp") or {}
-        if mtp.get("acceptance") is not None:
-            check("mtp", round(mtp["acceptance"] * 100.0, 1), "mtp")
+    # 上下文（llama: 日志合并后的 ctx；sglang: KV cache 占用）
+    check("ctx", (engine.get("ctx") or {}).get("pct"), "ctx")
+
+    # MTP 接受率（仅 llama.cpp 日志源）
+    mtp = (engine.get("log") or {}).get("mtp") or {}
+    if mtp.get("acceptance") is not None:
+        check("mtp", round(mtp["acceptance"] * 100.0, 1), "mtp")
+
+    # 请求队列（仅 SGLang）
+    if etype == "sglang":
+        check("queue", (engine.get("requests") or {}).get("waiting"), "queue")
 
     return alerts

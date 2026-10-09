@@ -20,6 +20,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS ts_llama (
   host_id TEXT NOT NULL, ts INTEGER NOT NULL,
   gen_speed REAL, prompt_speed REAL, ctx_used REAL, mtp_acceptance REAL,
+  accept_length REAL,
   PRIMARY KEY (host_id, ts)
 );
 CREATE TABLE IF NOT EXISTS ts_host (
@@ -33,6 +34,7 @@ CREATE TABLE IF NOT EXISTS ts_host (
 CREATE TABLE IF NOT EXISTS ts_llama_1m (
   host_id TEXT NOT NULL, ts INTEGER NOT NULL,
   gen_avg REAL, gen_max REAL, prompt_avg REAL, ctx_max REAL, mtp_avg REAL,
+  accept_avg REAL,
   PRIMARY KEY (host_id, ts)
 );
 CREATE TABLE IF NOT EXISTS ts_host_1m (
@@ -50,7 +52,7 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_host_ts ON events(host_id, ts);
 """
 
-LLAMA_SERIES = ("gen_speed", "prompt_speed", "ctx_used", "mtp_acceptance")
+LLAMA_SERIES = ("gen_speed", "prompt_speed", "ctx_used", "mtp_acceptance", "accept_length")
 HOST_SERIES = ("cpu", "mem_used", "mem_buff_cache", "swap_used",
                "net_rx", "net_tx", "proc_cpu", "load_1", "load_5", "load_15")
 GPU_KINDS = {"gpu_util": "util", "gpu_mem": "mem", "gpu_temp": "temp", "gpu_power": "power"}
@@ -76,6 +78,15 @@ class HistoryStore:
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(SCHEMA)
         self._conn.commit()
+        # 旧库非破坏性迁移：新列缺失时 ALTER 追加（旧行为保持不变）
+        for table, col in (("ts_llama", "accept_length REAL"), ("ts_llama_1m", "accept_avg REAL")):
+            try:
+                cols = [r[1] for r in self._conn.execute("PRAGMA table_info(%s)" % table)]
+                if col.split()[0] not in cols:
+                    self._conn.execute("ALTER TABLE %s ADD COLUMN %s" % (table, col))
+                    self._conn.commit()
+            except sqlite3.Error:
+                log.exception("历史库迁移失败: %s", table)
         self._lock = threading.Lock()
         self._closed = False
 
@@ -98,7 +109,7 @@ class HistoryStore:
             return
         with self._lock:
             self._conn.executemany(
-                "INSERT OR REPLACE INTO ts_llama VALUES (?,?,?,?,?,?)", rows)
+                "INSERT OR REPLACE INTO ts_llama VALUES (?,?,?,?,?,?,?)", rows)
             self._conn.commit()
 
     def write_host(self, rows: List[Tuple]) -> None:
@@ -114,7 +125,7 @@ class HistoryStore:
             return
         with self._lock:
             self._conn.executemany(
-                "INSERT OR REPLACE INTO ts_llama_1m VALUES (?,?,?,?,?,?,?)", rows)
+                "INSERT OR REPLACE INTO ts_llama_1m VALUES (?,?,?,?,?,?,?,?)", rows)
             self._conn.commit()
 
     def write_host_1m(self, rows: List[Tuple]) -> None:
@@ -137,7 +148,7 @@ class HistoryStore:
     # 读
     # ------------------------------------------------------------------
     def query_llama(self, host_id: str, t0: int, t1: int, stride: int = 1) -> List[Tuple]:
-        sql = ("SELECT ts, gen_speed, prompt_speed, ctx_used, mtp_acceptance "
+        sql = ("SELECT ts, gen_speed, prompt_speed, ctx_used, mtp_acceptance, accept_length "
                "FROM ts_llama WHERE host_id=? AND ts BETWEEN ? AND ?")
         params: List[Any] = [host_id, t0, t1]
         if stride > 1:
@@ -160,7 +171,7 @@ class HistoryStore:
             return self._conn.execute(sql, params).fetchall()
 
     def query_llama_1m(self, host_id: str, t0: int, t1: int, stride: int = 1) -> List[Tuple]:
-        sql = ("SELECT ts, gen_avg, gen_max, prompt_avg, ctx_max, mtp_avg "
+        sql = ("SELECT ts, gen_avg, gen_max, prompt_avg, ctx_max, mtp_avg, accept_avg "
                "FROM ts_llama_1m WHERE host_id=? AND ts BETWEEN ? AND ?")
         params: List[Any] = [host_id, t0, t1]
         if stride > 1:
@@ -205,7 +216,7 @@ class HistoryStore:
             def _max(idx):
                 vs = [r[idx] for r in ll if r[idx] is not None]
                 return max(vs) if vs else None
-            self.write_llama_1m([(host_id, t0, _avg(1), _max(1), _avg(2), _max(3), _avg(4))])
+            self.write_llama_1m([(host_id, t0, _avg(1), _max(1), _avg(2), _max(3), _avg(4), _avg(5))])
         hh = self.query_host(host_id, t0, t1)
         if hh:
             def _havg(idx):
@@ -324,7 +335,7 @@ class HistoryWriter:
             self._llama, self._host, self._events = {}, {}, []
         if llama:
             rows = [(h, ts, d.get("gen_speed"), d.get("prompt_speed"),
-                     d.get("ctx_used"), d.get("mtp_acceptance"))
+                     d.get("ctx_used"), d.get("mtp_acceptance"), d.get("accept_length"))
                     for (h, ts), d in llama.items()]
             self._store.write_llama(rows)
         if host:

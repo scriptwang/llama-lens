@@ -10,8 +10,8 @@
     <div class="login-card">
       <div class="login-logo">🦙</div>
       <div class="login-title">
-        <h1><span class="gradient-text">Llama</span>Lens · llama灵境</h1>
-        <p>llama.cpp 多主机监控 + 服务管理控制台</p>
+        <h1><span class="gradient-text">LLM</span>Lens</h1>
+        <p>LLM 推理引擎多主机监控 + 服务管理控制台</p>
       </div>
 
       <el-form v-if="authEnabled" label-position="top" @submit.prevent="doLogin">

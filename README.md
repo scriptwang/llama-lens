@@ -1,7 +1,8 @@
 # LlamaLens（llama灵境）
 
-llama.cpp llama-server 多主机**监控 + 管理**综合面板（英文名：LlamaLens）。
+推理引擎多主机**监控 + 管理**综合面板（英文名：LlamaLens）。一期支持 llama.cpp llama-server 与 SGLang，通过引擎抽象层（EngineAdapter）屏蔽底层引擎差异，可平滑扩展 vLLM 等引擎。
 
+- **多引擎**：主机管理按主机声明推理引擎（llama_cpp / sglang）；SGLang 展示请求队列 / KV 占用 / 投机解码（DFLASH 等）/ 显存分区，纯只读
 - **门户页**：所有主机状态一览（状态/模型/token 速度/GPU/CPU/内存）
 - **单主机详情**：token 速度 / GPU 按卡聚合 / CPU（每核）/ 内存 / 磁盘 / 网络 / 进程 / 模型 / Slot / 事件流，80+ 数据项
 - **实时**：WebSocket 1s 推送（可配置 1s/2s/5s/暂停），断线自动降级轮询
@@ -175,7 +176,11 @@ v2.0 主机数据统一存数据库（`data/llama_ctl.db`），在界面【主�
 |---|---|---|
 | `id` | 是 | 唯一标识，用于 URL `/host/<id>` |
 | `name` | 是 | 显示名称 |
-| `llama.host` / `llama.port` | 是 | llama-server 地址（支持 IPv6 字面量） |
+| `engine.type` | 否 | 推理引擎：`llama_cpp`（默认）或 `sglang` |
+| `engine.host` / `engine.port` | 否 | 引擎地址；缺省回退 `llama.host`，端口缺省 llama_cpp=8080 / sglang=30000 |
+| `engine.api_key` | 条件 | SGLang Bearer 认证（支持 `${ENV_VAR}`）；llama_cpp 不需要 |
+| `process.cmdline` | 否 | cmdline 固定串进程识别（comm 名对不上时用，如 sglang 主进程是 python3） |
+| `llama.host` / `llama.port` | 是 | llama-server 地址（支持 IPv6 字面量）；sglang 主机不使用该块 |
 | `llama.interval` | 否 | /health + /slots 轮询间隔（秒），默认 1.0 |
 | `llama.slow_interval` | 否 | /props + /v1/models 轮询间隔（秒），默认 30.0 |
 | `llama.timeout` | 否 | 单次请求超时（秒），默认 3.0 |
@@ -213,6 +218,7 @@ hosts:
 #### 1.3 增删主机（界面）
 
 - 门户页顶部【主机管理】→ 添加 / 编辑 / 删除主机：名称、llama-server 地址、SSH 凭证（密码/密钥，Fernet 加密入库）
+- 编辑对话框含【推理引擎】段：引擎类型（llama_cpp/sglang）、引擎地址/端口（0=沿用 llama 端口）、快/慢采样间隔、进程匹配串、SGLang API Key（Fernet 加密入库）
 - 改动即时生效，无需重启（监控任务动态增删）
 - 每台主机独立监控：一台故障不影响其他主机与面板自身
 
@@ -230,7 +236,8 @@ hosts:
 | mem（内存） | 85 | 95 | 高于告警 |
 | disk（磁盘） | 80 | 90 | 高于告警 |
 | ctx（上下文占用） | 80 | 90 | 高于告警 |
-| mtp（MTP 接受率） | 80 | 65 | **低于**告警 |
+| mtp（MTP 接受率，仅 llama） | 80 | 65 | **低于**告警 |
+| queue（SGLang 排队请求数） | 8 | 16 | 高于告警 |
 
 覆盖方式（全局或每主机，逐字段合并，未覆盖字段用默认值）：
 
@@ -451,6 +458,14 @@ docker ps                            # 查看 (healthy) 状态
 | 模型与 Slot | 模型卡（名称/路径/ftype/参数量/n_ctx/capabilities 等）+ 每 Slot 一张卡（状态/任务/prompt tokens/已解码/剩余/全量采样参数） |
 | 趋势区 | 12 图 3 组（llama：生成速度/预填充速度/上下文占用/MTP 接受率；GPU：利用率/显存/温度/功耗；系统：CPU/内存/网络/负载），5m/15m/1h/4h/24h/7d/90d 窗口切换（长窗口走持久化数据） |
 
+SGLang 主机（`engine.type: sglang`）展示差异：
+
+- 实时总览 MTP 仪表替换为「投机接受长度」（tok/step）；上下文卡数据源为 KV 缓存占用
+- 「实时生成任务」状态卡替换为 SglangStateCard：请求队列（running/queued）、KV 占用、投机解码（接受长度/draft 数/draft 模型）、显存分区、服务配置
+- 隐藏 llama 专属项：Slot 区、MTP、任务日志状态机（不硬造数据）
+- 进程卡标题为「sglang serve 进程」，按 cmdline 固定串匹配；模型卡追加量化 / KV 缓存 dtype / 最大上下文 / model_type
+- 排队请求数超阈值飘红（默认 warn=8 / danger=16）；纯只读，不调用 SGLang 写接口
+
 服务 Tab（v2.0）：
 
 | 区块 | 内容 |
@@ -484,6 +499,7 @@ Dracula / Synthwave '84 / Tokyo Night / Matrix。选择保存在浏览器（loca
 | 状态 | 展示 |
 |---|---|
 | llama 离线 | TopBar 红色徽章；速度卡 "—" 置灰 + "数据截至 HH:MM:SS"；GPU/系统区正常（SSH 仍可用） |
+| SGLang 离线 | TopBar 红色徽章「SGLang 离线」；速度/投机接受长度卡 "—" 置灰；SglangStateCard 显示「SGLang 离线，暂无服务数据」；GPU/系统区正常（SSH 仍可用） |
 | SSH 断开 | TopBar 黄色徽章；GPU/系统/进程区显示"数据不可用（SSH 断开）"占位，保留最后值置灰；实时总览/任务区正常（API 数据仍可用） |
 | 日志不可用 | 任务卡显示"日志不可用，使用 API 数据"，速度回退 /slots 差分并标注数据来源 |
 | 两者都断 | 全页红色横幅"主机不可达" |

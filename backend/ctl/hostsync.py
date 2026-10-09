@@ -9,7 +9,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from ..config import (HostConfig, LlamaCfg, LogCfg, SshCfg,
+from ..config import (EngineCfg, HostConfig, LlamaCfg, LogCfg, SshCfg,
                       merge_thresholds)
 from . import database as db
 from .security import decrypt_secret, encrypt_secret
@@ -22,6 +22,8 @@ MONITOR_FIELDS = (
     "ssh_timeout", "key_path", "process_name", "systemd_unit", "log_source",
     "log_unit", "log_path", "log_follow", "log_catchup_sec", "disk_mounts",
     "thresholds", "notify_enabled", "notify_type", "notify_url",
+    "engine_type", "engine_host", "engine_port", "engine_interval",
+    "engine_slow_interval", "engine_timeout", "process_cmdline",
 )
 
 
@@ -89,12 +91,34 @@ def row_to_host_config(row, global_thresholds: Optional[dict] = None) -> HostCon
         host_t = json.loads(row["thresholds"]) if row["thresholds"] else {}
     except (ValueError, TypeError):
         host_t = {}
+    etype = (row["engine_type"] or "llama_cpp") if "engine_type" in row.keys() else "llama_cpp"
+    ehost = (row["engine_host"] or row["llama_host"] or row["host"]) if "engine_host" in row.keys() else ""
+    eport = int(row["engine_port"]) if "engine_port" in row.keys() else 0
+    eint = float(row["engine_interval"]) if "engine_interval" in row.keys() else 1.0
+    eslow = float(row["engine_slow_interval"]) if "engine_slow_interval" in row.keys() else 30.0
+    etimeo = float(row["engine_timeout"]) if "engine_timeout" in row.keys() else 3.0
+    ekey = decrypt_secret(row["engine_api_key_enc"]) if (row["engine_api_key_enc"] if "engine_api_key_enc" in row.keys() else None) else None
+    engine = EngineCfg(
+        type=etype,
+        host=ehost,
+        port=eport or (30000 if etype == "sglang" else 8080),
+        interval=eint,
+        slow_interval=eslow,
+        timeout=etimeo,
+        api_key=ekey,
+    )
+    process_cmdline = (row["process_cmdline"] or "") if "process_cmdline" in row.keys() else ""
+    if not process_cmdline and engine.type == "sglang":
+        process_cmdline = "sglang serve"
+    process_cmdline = re.sub(r"[^\w .:/+-]", "", process_cmdline).strip()
     return HostConfig(
         id=row["mid"],
         name=row["alias"] or row["host"],
         llama=llama,
         ssh=ssh,
+        engine=engine,
         process_name=row["process_name"],
+        process_cmdline=process_cmdline,
         log=log_cfg,
         disk_mounts=list(mounts),
         systemd_unit=row["systemd_unit"] or "llama-server.service",
@@ -127,14 +151,17 @@ def import_from_yaml_if_empty(app_cfg) -> int:
             enc = encrypt_secret(h.ssh.password)
         else:
             enc = None
+        eng_key_enc = encrypt_secret(h.engine.api_key) if h.engine.api_key else None
         cur = db.execute(
             """INSERT INTO hosts (mid, alias, host, port, username, encrypted_pwd,
                auth_type, key_path, monitor_enabled, llama_host, llama_port,
                llama_interval, llama_slow_interval, llama_timeout,
                ssh_interval, ssh_keepalive, ssh_timeout,
                process_name, systemd_unit, log_source, log_unit, log_path,
-               log_follow, log_catchup_sec, disk_mounts, thresholds)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               log_follow, log_catchup_sec, disk_mounts, thresholds,
+               engine_type, engine_host, engine_port, engine_interval,
+               engine_slow_interval, engine_timeout, engine_api_key_enc, process_cmdline)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 h.id, h.name, h.ssh.host, h.ssh.port, h.ssh.user, enc,
                 "password" if h.ssh.password else "key", h.ssh.key_path, 1,
@@ -144,6 +171,8 @@ def import_from_yaml_if_empty(app_cfg) -> int:
                 1 if h.log.follow else 0, h.log.catchup_sec,
                 json.dumps(h.disk_mounts),
                 json.dumps(h.thresholds) if h.thresholds else None,
+                h.engine.type, h.engine.host, h.engine.port, h.engine.interval,
+                h.engine.slow_interval, h.engine.timeout, eng_key_enc, h.process_cmdline,
             ),
         )
         db.log_action(cur.lastrowid, "system", "import_yaml", "",

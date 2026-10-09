@@ -34,13 +34,13 @@ def test_markdown_full():
                  "sub_state": "running", "unit_file_state": "enabled"}]
     events = [{"ts": 1725600000, "level": "info", "type": "llama_up", "msg": "llama 上线"}]
     md = _build_markdown(_row(), _snap(), services, events, ["E some error"])
-    for expected in ("# LlamaLens 体检报告 — ai (10.0.0.28:22)",
-                     "## 总体状态", "llama：在线", "SSH：已连接",
+    for expected in ("# LLMLens 体检报告 — ai (10.0.0.28:22)",
+                     "## 总体状态", "引擎：在线", "SSH：已连接",
                      "## 系统", "CPU：12%", "内存：12.7 GiB / 31.2 GiB",
                      "磁盘 /：44% 已用", "网络：rx 1.2 MB/s / tx 0.3 MB/s",
                      "## GPU", "RTX 3080", "85%", "72°C", "280 W",
                      "## 服务", "llama-server.service | active (running) | enabled",
-                     "## llama API", "Qwen3.8-27B-Q6_K.gguf", "45.2 tok/s",
+                     "## 引擎 API", "Qwen3.8-27B-Q6_K.gguf", "45.2 tok/s",
                      "## 最近事件（1）", "llama 上线",
                      "## 最近错误日志（1）", "E some error"):
         assert expected in md, "缺少: %s" % expected

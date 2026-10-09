@@ -45,6 +45,16 @@ echo ==DF==
 df -B1 --output=source,target,size,used,avail,pcent {df_mounts} 2>/dev/null
 echo ==PROC==
 PID=$(pgrep -x {process_name} | head -1)
+if [ -z "$PID" ] && [ -n "{process_cmdline}" ]; then
+  # comm 对不上时（如 sglang 主进程是 python3）按 cmdline 固定串匹配。
+  # 跳过含 ==PROC== 的条目：本脚本自身经 sh -c 执行，其 cmdline 含整段脚本文本会自匹配
+  for d in /proc/[0-9]*; do
+    cl=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null)
+    [ -n "$cl" ] || continue
+    case "$cl" in *==PROC==*) continue ;; esac
+    case "$cl" in *"{process_cmdline}"*) PID=${{d##*/}}; break ;; esac
+  done
+fi
 if [ -z "$PID" ]; then
   # comm 被内核截断到 15 字符：长进程名回退 cmdline argv[0] basename 匹配
   # （不用 basename 命令：argv[0] 可能以 - 开头[如 -zsh]会被当选项解析）
@@ -538,6 +548,7 @@ class SshPoller:
         # 参数全部 shlex.quote：即使配置被绕过校验写入脏值，也无法注入命令
         return BATCH_CMD.format(
             process_name=shlex.quote(self.cfg.process_name),
+            process_cmdline=self.cfg.process_cmdline,
             systemd_unit=shlex.quote(self.cfg.systemd_unit),
             df_mounts=" ".join(shlex.quote(m) for m in mounts),
         )

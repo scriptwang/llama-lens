@@ -45,9 +45,9 @@
             <div v-else class="dg-none">无活动告警</div>
           </div>
 
-          <!-- llama API -->
+          <!-- 引擎 API -->
           <div class="dg-card">
-            <div class="dg-card-title"><el-icon><Lightning /></el-icon>llama API</div>
+            <div class="dg-card-title"><el-icon><Lightning /></el-icon>引擎 API</div>
             <div class="dg-kv">
               <span class="k">/health</span><b :class="data.llama_api.online ? 'v-ok' : 'v-bad'">{{ data.llama_api.online ? 'OK（在线）' : '失败（离线）' }}</b>
               <span class="k">模型</span><b class="dg-model">{{ data.llama_api.model }}</b>
